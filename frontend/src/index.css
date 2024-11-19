@@ -1,0 +1,103 @@
+@import 'tailwindcss/base';
+@import 'tailwindcss/components';
+@import 'tailwindcss/utilities';
+@import './styles/theme.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --primary: #646cff;
+    --primary-hover: #535bf2;
+    --background-dark: #242424;
+    --background-light: #ffffff;
+    --text-dark: rgba(255, 255, 255, 0.87);
+    --text-light: #213547;
+  }
+
+  html {
+    font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    font-synthesis: none;
+  }
+
+  body {
+    @apply m-0 min-h-screen min-w-[320px] bg-white dark:bg-[#242424] text-[#213547] dark:text-[rgba(255,255,255,0.87)];
+  }
+
+  h1 {
+    @apply text-5xl leading-tight;
+  }
+
+  a {
+    @apply font-medium text-[#646cff] no-underline hover:text-[#535bf2];
+  }
+}
+
+@layer components {
+  .btn-default {
+    @apply rounded-lg border border-transparent px-5 py-2.5 
+           text-base font-medium font-inherit
+           bg-[#f9f9f9] dark:bg-[#1a1a1a] 
+           cursor-pointer transition-colors duration-250
+           hover:border-[#646cff]
+           focus:outline-none focus:ring-4 focus:ring-[#646cff]/50;
+  }
+}
+
+/* Custom styles that don't fit into Tailwind's utility classes */
+@layer utilities {
+  .place-items-center {
+    place-items: center;
+  }
+
+  /* Dark mode input styles */
+  .dark .ant-input,
+  .dark .ant-input-password,
+  .dark .ant-input-number,
+  .dark .ant-select-selector,
+  .dark .ant-picker {
+    background-color: #1f2937 !important;
+    border-color: #374151 !important;
+    color: #e5e7eb !important;
+  }
+
+  .dark .ant-input:hover,
+  .dark .ant-input-password:hover,
+  .dark .ant-input-number:hover,
+  .dark .ant-select-selector:hover,
+  .dark .ant-picker:hover {
+    border-color: #4b5563 !important;
+  }
+
+  .dark .ant-input:focus,
+  .dark .ant-input-password:focus,
+  .dark .ant-input-number:focus,
+  .dark .ant-select-selector:focus,
+  .dark .ant-picker:focus,
+  .dark .ant-input-focused,
+  .dark .ant-input-password-focused,
+  .dark .ant-input-number-focused,
+  .dark .ant-select-selector-focused,
+  .dark .ant-picker-focused {
+    border-color: #60a5fa !important;
+    box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.2) !important;
+  }
+
+  .dark .ant-input::placeholder,
+  .dark .ant-input-password::placeholder,
+  .dark .ant-input-number::placeholder,
+  .dark .ant-select-selector::placeholder,
+  .dark .ant-picker::placeholder {
+    color: #9ca3af !important;
+  }
+
+  /* Fix for weird border in dark mode */
+  .dark .ant-card {
+    border-color: #374151 !important;
+  }
+}

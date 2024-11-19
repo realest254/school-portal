@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .button {
+            display: inline-block;
+            padding: 12px 24px;
+            background-color: #4F46E5;
+            color: white;
+            text-decoration: none;
+            border-radius: 6px;
+            margin: 20px 0;
+        }
+        .footer {
+            margin-top: 30px;
+            font-size: 12px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <h2>Welcome to School Portal!</h2>
+    
+    <p>Hello,</p>
+    
+    <p>You've been invited to join School Portal as a student. We're excited to have you on board!</p>
+    
+    <p>To complete your registration, please click the button below:</p>
+    
+    <a href="{{ .signUpUrl }}" class="button">Complete Registration</a>
+    
+    <p><strong>Important Notes:</strong></p>
+    <ul>
+        <li>This invite is valid for 24 hours</li>
+        <li>This link can only be used once</li>
+        <li>Do not share this link with anyone</li>
+    </ul>
+    
+    <p>If you didn't expect this invitation or have any questions, please contact your school administrator.</p>
+    
+    <div class="footer">
+        <p>This is an automated message, please do not reply to this email.</p>
+        <p>School Portal - Secure Learning Management System</p>
+    </div>
+</body>
+</html>

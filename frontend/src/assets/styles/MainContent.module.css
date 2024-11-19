@@ -1,0 +1,92 @@
+.mainContent {
+    padding: 1.5rem;
+    margin-left: 250px;
+    margin-top: 4rem;
+    min-height: calc(100vh - 4rem);
+    background-color: var(--main-bg, #f9fafb);
+  }
+  
+  .metricsGrid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1.5rem;
+    margin-bottom: 1.5rem;
+  }
+  
+  .metricCard {
+    background-color: var(--card-bg, #ffffff);
+    padding: 1.5rem;
+    border-radius: 0.5rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  }
+  
+  .metricLabel {
+    font-size: 0.875rem;
+    color: var(--text-secondary, #4b5563);
+    margin-bottom: 0.5rem;
+  }
+  
+  .metricValue {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+  }
+  
+  .value {
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: var(--text-primary, #111827);
+  }
+  
+  .change {
+    font-size: 0.875rem;
+    font-weight: 500;
+  }
+  
+  .positive {
+    color: var(--success, #059669);
+  }
+  
+  .negative {
+    color: var(--danger, #dc2626);
+  }
+  
+  .contentGrid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1.5rem;
+  }
+  
+  .card {
+    background-color: var(--card-bg, #ffffff);
+    border-radius: 0.5rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    padding: 1.5rem;
+  }
+  
+  .cardTitle {
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: var(--text-primary, #111827);
+    margin-bottom: 1rem;
+  }
+  
+  .cardContent {
+    min-height: 300px;
+  }
+  
+  @media (max-width: 1024px) {
+    .contentGrid {
+      grid-template-columns: 1fr;
+    }
+  }
+  
+  @media (max-width: 768px) {
+    .mainContent {
+      margin-left: 0;
+    }
+    
+    .metricsGrid {
+      grid-template-columns: 1fr;
+    }
+  }

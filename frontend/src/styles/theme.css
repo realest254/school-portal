@@ -1,0 +1,247 @@
+:root {
+  /* Base colors */
+  --bg-primary: #ffffff;
+  --bg-secondary: #f3f4f6;
+  --bg-elevated: #ffffff;
+  --text-primary: #111827;
+  --text-secondary: #4b5563;
+  --border-color: #e5e7eb;
+  --hover-bg: #f9fafb;
+  
+  /* Ant Design specific */
+  --ant-primary-color: #3b82f6;
+  --ant-component-bg: var(--bg-elevated);
+  --ant-border-color: var(--border-color);
+  
+  /* Smooth transition for all color properties */
+  transition: color 0.15s cubic-bezier(0.4, 0, 0.2, 1),
+              background-color 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+:root[class~="dark"] {
+  --bg-primary: #111827;
+  --bg-secondary: #1f2937;
+  --bg-elevated: #1f2937;
+  --text-primary: #f9fafb;
+  --text-secondary: #9ca3af;
+  --border-color: #374151;
+  --hover-bg: #374151;
+  
+  /* Ant Design dark mode */
+  --ant-primary-color: #60a5fa;
+  --ant-component-bg: var(--bg-elevated);
+  --ant-border-color: var(--border-color);
+}
+
+/* Apply variables to elements */
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+/* Ant Design components */
+.ant-card,
+.ant-modal,
+.ant-drawer,
+.ant-select-dropdown,
+.ant-picker-dropdown,
+.ant-popover-content {
+  background-color: var(--bg-elevated) !important;
+  border-color: var(--border-color) !important;
+  color: var(--text-primary) !important;
+}
+
+.ant-input,
+.ant-select-selector,
+.ant-picker {
+  background-color: var(--bg-secondary) !important;
+  border-color: var(--border-color) !important;
+  color: var(--text-primary) !important;
+}
+
+/* Remove individual transitions */
+* {
+  transition: none !important;
+}
+
+/* Apply transition only to the root element */
+:root {
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+/* Performance optimizations */
+.ant-select-dropdown,
+.ant-modal,
+.ant-message,
+.ant-notification,
+.ant-drawer {
+  transition: none !important;
+}
+
+/* Tailwind dark mode compatibility */
+:root[class~="dark"] .dark\:bg-gray-800 {
+  background-color: var(--bg-elevated) !important;
+}
+
+:root[class~="dark"] .dark\:bg-gray-900 {
+  background-color: var(--bg-primary) !important;
+}
+
+:root[class~="dark"] .dark\:text-white {
+  color: var(--text-primary) !important;
+}
+
+/* Modal-specific styles */
+.ant-modal .ant-input,
+.ant-modal .ant-input-password,
+.ant-modal .ant-input-number,
+.ant-modal .ant-select:not(.ant-select-customize-input) .ant-select-selector {
+  background: none !important;
+  border-color: inherit !important;
+}
+
+/* Remove any existing input styles */
+.ant-input,
+.ant-input-password,
+.ant-input-number,
+.ant-select:not(.ant-select-customize-input) .ant-select-selector {
+  background: none !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+/* Placeholder text */
+.ant-input::placeholder,
+.ant-input-password::placeholder,
+.ant-input-number::placeholder,
+.ant-select-selection-placeholder {
+  color: #6b7280 !important;
+}
+
+/* Input icons */
+.ant-input-prefix,
+.ant-input-suffix {
+  color: #9ca3af !important;
+}
+
+/* Card styles */
+.ant-card {
+  background: none !important;
+  border-color: inherit !important;
+  transition: all 0.2s ease-in-out !important;
+}
+
+/* Select dropdown */
+.ant-select-dropdown {
+  background: none !important;
+  border-color: inherit !important;
+}
+
+.ant-select-item-option-selected {
+  background-color: rgba(59, 130, 246, 0.1) !important;
+}
+
+:root[class~="dark"] .ant-input::placeholder,
+:root[class~="dark"] .ant-input-password::placeholder,
+:root[class~="dark"] .ant-input-number::placeholder,
+:root[class~="dark"] .ant-select-selection-placeholder {
+  color: #6b7280 !important;
+}
+
+:root[class~="dark"] .ant-input-prefix,
+:root[class~="dark"] .ant-input-suffix {
+  color: #6b7280 !important;
+}
+
+/* Date picker panel */
+.ant-picker-panel {
+  background-color: #ffffff !important;
+}
+
+:root[class~="dark"] .ant-picker-panel {
+  background-color: #1f2937 !important;
+}
+
+.ant-picker-header {
+  color: #111827 !important;
+  border-bottom-color: #e5e7eb !important;
+}
+
+:root[class~="dark"] .ant-picker-header {
+  color: #f3f4f6 !important;
+  border-bottom-color: #374151 !important;
+}
+
+.ant-picker-header button {
+  color: #111827 !important;
+}
+
+:root[class~="dark"] .ant-picker-header button {
+  color: #f3f4f6 !important;
+}
+
+.ant-picker-cell {
+  color: #111827 !important;
+}
+
+:root[class~="dark"] .ant-picker-cell {
+  color: #f3f4f6 !important;
+}
+
+/* Dark mode overrides */
+:root[class~="dark"] .ant-input {
+  background-color: #374151 !important;
+  border-color: #4B5563 !important;
+  color: #F3F4F6 !important;
+}
+
+:root[class~="dark"] .ant-input-affix-wrapper {
+  background-color: #374151 !important;
+  border-color: #4B5563 !important;
+}
+
+:root[class~="dark"] .ant-input-prefix {
+  color: #9CA3AF !important;
+}
+
+.ant-input-affix-wrapper {
+  background: none !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.ant-input {
+  background: none !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+/* Transitions */
+.ant-modal .ant-input,
+.ant-modal .ant-input-password,
+.ant-modal .ant-input-number,
+.ant-modal .ant-select-selector,
+.ant-modal .ant-picker,
+.ant-modal .ant-card {
+  transition: all 0.2s ease-in-out !important;
+}
+
+/* Add global transition for theme changes */
+* {
+  transition: background-color 0.2s ease-in-out,
+              border-color 0.2s ease-in-out,
+              color 0.2s ease-in-out !important;
+}
+
+/* Optimize performance by excluding certain properties from transition */
+*:not([class*='ant-']) {
+  will-change: background-color, border-color, color;
+}
+
+/* Remove transitions from specific elements where it might cause performance issues */
+.ant-select-dropdown,
+.ant-modal,
+.ant-message,
+.ant-notification {
+  transition: none !important;
+}
