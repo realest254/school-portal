@@ -164,12 +164,15 @@ export class InviteService {
     return { valid: true };
   }
 
-  async markInviteAsUsed(id: string): Promise<void> {
+  async markInviteAsUsed(id: string, acceptedBy: string): Promise<void> {
     await this.db.query(SQL`
       UPDATE invites 
       SET status = 'accepted', 
-          accepted_at = NOW() 
+          accepted_at = NOW(),
+          accepted_by = ${acceptedBy}
       WHERE id = ${id}
+      AND status = 'pending'
+      AND expiration_date > NOW()
     `);
   }
 
