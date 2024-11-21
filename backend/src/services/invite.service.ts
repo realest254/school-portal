@@ -59,18 +59,23 @@ export class InviteService {
     }
   }
 
-  async createInvite(data: { email: string; role: string; invited_by: string }): Promise<any> {
+  async createInvite(data: { 
+    email: string; 
+    role: string; 
+    invited_by: string;
+    expiration_date?: Date;
+  }): Promise<any> {
     const client = await this.db.connect();
     try {
       await client.query('BEGIN');
       
-      const expiration_date = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+      const expiration = data.expiration_date || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
       
       const result = await client.query(SQL`
         INSERT INTO invites (
           email, role, status, invited_by, expiration_date
         ) VALUES (
-          ${data.email}, ${data.role}, 'pending', ${data.invited_by}, ${expiration_date}
+          ${data.email}, ${data.role}, 'pending', ${data.invited_by}, ${expiration}
         ) RETURNING *
       `);
       
@@ -97,34 +102,29 @@ export class InviteService {
     try {
       await client.query('BEGIN');
       
-      await client.query(SQL`
-        UPDATE invites 
-        SET status = 'expired' 
+      // Get the existing invite
+      const existingInvite = await client.query(SQL`
+        SELECT * FROM invites 
         WHERE email = ${email} 
         AND status = 'pending'
-      `);
-      
-      const expiration_date = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-      const result = await client.query(SQL`
-        INSERT INTO invites (
-          email, role, status, invited_by, expiration_date
-        )
-        SELECT 
-          email, role, 'pending', ${invited_by}, ${expiration_date}
-        FROM invites 
-        WHERE email = ${email} 
         ORDER BY created_at DESC 
         LIMIT 1
+      `);
+      
+      if (existingInvite.rows.length === 0) {
+        throw new Error('No pending invite found for this email');
+      }
+
+      const expiration_date = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+      
+      // Update the invite with new expiration date
+      const result = await client.query(SQL`
+        UPDATE invites 
+        SET expiration_date = ${expiration_date},
+            invited_by = ${invited_by}
+        WHERE id = ${existingInvite.rows[0].id}
         RETURNING *
       `);
-
-      // Resend invite email using Supabase
-      await emailService.sendInviteEmail(
-        email,
-        result.rows[0].role,
-        result.rows[0].id,
-        process.env.FRONTEND_URL || 'http://localhost:3000'
-      );
       
       await client.query('COMMIT');
       return result.rows[0];

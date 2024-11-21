@@ -17,29 +17,60 @@ import {
   DialogContent,
   DialogActions,
   TextField,
+  MenuItem,
 } from '@mui/material';
 import { Add as AddIcon, Delete as DeleteIcon } from '@mui/icons-material';
 import { useSnackbar } from 'notistack';
 
 const ClassesSection = ({ classes, onAddClass, onDeleteClass }) => {
   const [openDialog, setOpenDialog] = useState(false);
-  const [className, setClassName] = useState('');
+  const [formData, setFormData] = useState({
+    name: '',
+    grade: '',
+    stream: '',
+    academicYear: new Date().getFullYear(),
+    teacherName: '', // We'll send the teacher name to backend
+  });
   const { enqueueSnackbar } = useSnackbar();
 
   const handleOpenDialog = () => {
     setOpenDialog(true);
-    setClassName('');
+    setFormData({
+      name: '',
+      grade: '',
+      stream: '',
+      academicYear: new Date().getFullYear(),
+      teacherName: '',
+    });
   };
 
   const handleCloseDialog = () => {
     setOpenDialog(false);
-    setClassName('');
+    setFormData({
+      name: '',
+      grade: '',
+      stream: '',
+      academicYear: new Date().getFullYear(),
+      teacherName: '',
+    });
+  };
+
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: value
+    }));
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      await onAddClass({ name: className });
+      await onAddClass({
+        ...formData,
+        grade: parseInt(formData.grade),
+        academicYear: parseInt(formData.academicYear)
+      });
       handleCloseDialog();
     } catch (error) {
       enqueueSnackbar(error.message || 'Failed to add class', { variant: 'error' });
@@ -68,17 +99,25 @@ const ClassesSection = ({ classes, onAddClass, onDeleteClass }) => {
             <TableHead>
               <TableRow>
                 <TableCell>Class Name</TableCell>
+                <TableCell>Grade</TableCell>
+                <TableCell>Stream</TableCell>
+                <TableCell>Academic Year</TableCell>
+                <TableCell>Teacher Name</TableCell>
                 <TableCell align="right">Actions</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {classes.map((classItem) => (
-                <TableRow key={classItem.name}>
+                <TableRow key={classItem.id}>
                   <TableCell>{classItem.name}</TableCell>
+                  <TableCell>{classItem.grade}</TableCell>
+                  <TableCell>{classItem.stream || '-'}</TableCell>
+                  <TableCell>{classItem.academicYear}</TableCell>
+                  <TableCell>{classItem.teacherName || '-'}</TableCell>
                   <TableCell align="right">
                     <IconButton
                       color="error"
-                      onClick={() => onDeleteClass(classItem.name)}
+                      onClick={() => onDeleteClass(classItem.id)}
                       size="small"
                     >
                       <DeleteIcon />
@@ -99,11 +138,53 @@ const ClassesSection = ({ classes, onAddClass, onDeleteClass }) => {
               autoFocus
               margin="dense"
               label="Class Name"
+              name="name"
               type="text"
               fullWidth
               required
-              value={className}
-              onChange={(e) => setClassName(e.target.value)}
+              value={formData.name}
+              onChange={handleChange}
+            />
+            <TextField
+              margin="dense"
+              label="Grade"
+              name="grade"
+              type="number"
+              fullWidth
+              required
+              value={formData.grade}
+              onChange={handleChange}
+              inputProps={{ min: 1, max: 12 }}
+            />
+            <TextField
+              margin="dense"
+              label="Stream (Optional)"
+              name="stream"
+              type="text"
+              fullWidth
+              value={formData.stream}
+              onChange={handleChange}
+            />
+            <TextField
+              margin="dense"
+              label="Academic Year"
+              name="academicYear"
+              type="number"
+              fullWidth
+              required
+              value={formData.academicYear}
+              onChange={handleChange}
+              inputProps={{ min: 2000, max: 2100 }}
+            />
+            <TextField
+              margin="dense"
+              label="Teacher Name"
+              name="teacherName"
+              type="text"
+              fullWidth
+              value={formData.teacherName}
+              onChange={handleChange}
+              helperText="Enter the name of the teacher for this class"
             />
           </DialogContent>
           <DialogActions>

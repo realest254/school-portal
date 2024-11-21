@@ -50,27 +50,28 @@ export class InviteController {
 
   public async createInvite(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const data = req.body as CreateInviteDTO;
+      const { email, role } = req.body as CreateInviteDTO;
       const userId = req.user.id;
 
       // Validate email domain
-      const domainValidation = await this.inviteService.validateEmailDomain(data.email, data.role);
+      const domainValidation = await this.inviteService.validateEmailDomain(email, role);
       if (!domainValidation.valid) {
         res.status(400).json({ error: domainValidation.message });
         return;
       }
 
       // Check for spam
-      const spamCheck = await this.inviteService.checkInviteSpam(data.email);
+      const spamCheck = await this.inviteService.checkInviteSpam(email);
       if (spamCheck.isSpam) {
         res.status(400).json({ error: spamCheck.message });
         return;
       }
 
+      // Create invite with expiration date
       const invite = await this.inviteService.createInvite({
-        ...data,
-        invited_by: userId,
-        expiration_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 days from now
+        email,
+        role,
+        invited_by: userId
       });
 
       await sendInviteEmail(invite);

@@ -23,9 +23,12 @@ export const InviteSchema = z.object({
 
 export type Invite = z.infer<typeof InviteSchema>;
 
+// Update CreateInviteSchema to include expiration_date and invited_by
 export const CreateInviteSchema = InviteSchema.pick({
   email: true,
-  role: true
+  role: true,
+  invited_by: true,
+  expiration_date: true
 });
 
 export type CreateInviteDTO = z.infer<typeof CreateInviteSchema>;

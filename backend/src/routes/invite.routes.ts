@@ -1,7 +1,6 @@
 import { Router } from 'express';
 import { verifyToken, requireRole, UserRole } from '../middlewares/auth.middleware';
 import { InviteController } from '../controllers/invite.controller';
-import { RequestHandler } from 'express';
 
 const router = Router();
 const inviteController = InviteController.getInstance();
@@ -11,27 +10,27 @@ router.use(verifyToken);
 router.use(requireRole(UserRole.ADMIN));
 
 // Create invite
-router.post('/', (inviteController.createInvite as RequestHandler));
+router.post('/', inviteController.createInvite);
 
 // Create bulk invites
-router.post('/bulk', (inviteController.createBulkInvites as RequestHandler));
+router.post('/bulk', inviteController.createBulkInvites);
 
 // Check invite validity
-router.get('/:id/check', (inviteController.checkInviteValidity as RequestHandler));
+router.get('/:id/check', inviteController.checkInviteValidity);
 
 // Mark invite as used
-router.post('/:id/use', (inviteController.markInviteAsUsed as RequestHandler));
+router.post('/:id/use', inviteController.markInviteAsUsed);
 
 // Validate email domain
-router.post('/validate-domain', (inviteController.validateEmailDomain as RequestHandler));
+router.post('/validate-domain', inviteController.validateEmailDomain);
 
 // Check invite spam
-router.post('/check-spam', (inviteController.checkInviteSpam as RequestHandler));
+router.post('/check-spam', inviteController.checkInviteSpam);
 
 // Resend invite
-router.post('/resend', (inviteController.resendInvite as RequestHandler));
+router.post('/resend', inviteController.resendInvite);
 
 // Get invite history
-router.get('/history/:email', (inviteController.getInviteHistory as RequestHandler));
+router.get('/history/:email', inviteController.getInviteHistory);
 
 export default router;
