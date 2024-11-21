@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { verifyToken, requireRole, UserRole } from '../middlewares/auth.middleware';
+import { verifyToken, requireRole } from '../middlewares/auth.middleware';
 import { InviteController } from '../controllers/invite.controller';
 
 const router = Router();
@@ -7,7 +7,7 @@ const inviteController = InviteController.getInstance();
 
 // Apply authentication middleware
 router.use(verifyToken);
-router.use(requireRole(UserRole.ADMIN));
+router.use(requireRole(['admin']));
 
 // Create invite
 router.post('/', inviteController.createInvite);
@@ -32,5 +32,8 @@ router.post('/resend', inviteController.resendInvite);
 
 // Get invite history
 router.get('/history/:email', inviteController.getInviteHistory);
+
+// Validate token
+router.post('/validate-token', inviteController.validateToken);
 
 export default router;

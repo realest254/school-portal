@@ -439,6 +439,21 @@ class AuthService {
       return null;
     }
   }
+
+  /**
+   * Check invite token validity with backend
+   * @param {string} token - Encrypted invite token
+   * @returns {Promise<Object>} Validation result with invite details
+   */
+  async checkInviteToken(token) {
+    try {
+      const response = await inviteService.validateToken(token);
+      return response;
+    } catch (error) {
+      console.error('Error validating invite token:', error);
+      throw new Error(error.response?.data?.message || 'Failed to validate invite token');
+    }
+  }
 }
 
 export const authService = new AuthService();

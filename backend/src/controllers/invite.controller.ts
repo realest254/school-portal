@@ -4,6 +4,7 @@ import { CreateInviteDTO, Invite } from '../models/invite.model';
 import { sendInviteEmail } from '../utils/email';
 import { UserRole } from '../middlewares/auth.middleware';
 import { ParamsDictionary } from 'express-serve-static-core';
+import { decrypt } from '../utils/encryption';
 
 // Extend Express Request to include user
 interface AuthenticatedRequest extends Request<ParamsDictionary, any, any> {
@@ -39,6 +40,7 @@ export class InviteController {
     this.checkInviteSpam = this.checkInviteSpam.bind(this);
     this.resendInvite = this.resendInvite.bind(this);
     this.getInviteHistory = this.getInviteHistory.bind(this);
+    this.validateToken = this.validateToken.bind(this);
   }
 
   public static getInstance(): InviteController {
@@ -137,12 +139,67 @@ export class InviteController {
 
   public async checkInviteValidity(req: Request, res: Response): Promise<void> {
     try {
-      const { id } = req.params;
-      const result = await this.inviteService.checkInviteValidity(id);
-      res.json(result);
+      const { token } = req.params;
+      
+      // Decrypt token to get invite data
+      const inviteData = decrypt(token);
+
+      // Check if invite exists and is valid
+      const invite = await this.inviteService.getById(inviteData.id);
+      
+      if (!invite) {
+        res.status(404).json({
+          valid: false,
+          reason: 'not_found',
+          message: 'Invite not found'
+        });
+        return;
+      }
+
+      // Verify email and role match
+      if (invite.email !== inviteData.email || invite.role !== inviteData.role) {
+        res.status(400).json({
+          valid: false,
+          reason: 'invalid_data',
+          message: 'Invalid invite data'
+        });
+        return;
+      }
+
+      // Check if invite is expired
+      if (new Date() > new Date(invite.expiration_date)) {
+        res.status(400).json({
+          valid: false,
+          reason: 'expired',
+          message: 'Invite has expired'
+        });
+        return;
+      }
+
+      // Check if invite is already used
+      if (invite.status === 'used') {
+        res.status(400).json({
+          valid: false,
+          reason: 'already_used',
+          message: 'Invite has already been used'
+        });
+        return;
+      }
+
+      res.json({
+        valid: true,
+        invite: {
+          email: invite.email,
+          role: invite.role
+        }
+      });
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to check invite validity';
-      res.status(400).json({ error: message });
+      console.error('Error checking invite validity:', error);
+      res.status(400).json({
+        valid: false,
+        reason: 'invalid_token',
+        message: 'Invalid invite token'
+      });
     }
   }
 
@@ -199,6 +256,26 @@ export class InviteController {
       res.json(history);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to get invite history';
+      res.status(400).json({ error: message });
+    }
+  }
+
+  /**
+   * Validate invite token
+   */
+  public async validateToken(req: Request, res: Response): Promise<void> {
+    try {
+      const { token } = req.body;
+      
+      if (!token) {
+        res.status(400).json({ error: 'Token is required' });
+        return;
+      }
+
+      const result = await this.inviteService.validateToken(token);
+      res.json(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to validate token';
       res.status(400).json({ error: message });
     }
   }

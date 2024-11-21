@@ -3,6 +3,7 @@ import SQL from 'sql-template-strings';
 import pool from '../db';
 import { CreateInviteSchema, InviteSchema } from '../models/invite.model';
 import { emailService } from './email.service';
+import { decrypt } from '../utils/encryption';
 
 export class InviteService {
   private db: Pool;
@@ -274,6 +275,52 @@ export class InviteService {
       throw new Error(error instanceof Error ? error.message : 'Failed to cancel invite');
     } finally {
       client.release();
+    }
+  }
+
+  /**
+   * Validate and decrypt invite token
+   * @param token - Encrypted token from invite URL
+   */
+  async validateToken(token: string): Promise<{ valid: boolean; reason?: string; invite?: any }> {
+    try {
+      // Decrypt the token
+      const decrypted = decrypt(token);
+      const { id, email, role } = decrypted;
+
+      // Get invite from database
+      const invite = await this.getById(id);
+      
+      if (!invite) {
+        return { valid: false, reason: 'invalid' };
+      }
+
+      // Verify email and role match
+      if (invite.email !== email || invite.role !== role) {
+        return { valid: false, reason: 'invalid' };
+      }
+
+      // Check if invite is expired
+      if (new Date() > new Date(invite.expiration_date)) {
+        return { valid: false, reason: 'expired' };
+      }
+
+      // Check if invite is already used
+      if (invite.status === 'accepted') {
+        return { valid: false, reason: 'already_used' };
+      }
+
+      return { 
+        valid: true, 
+        invite: {
+          id: invite.id,
+          email: invite.email,
+          role: invite.role
+        }
+      };
+    } catch (error) {
+      console.error('Token validation error:', error);
+      return { valid: false, reason: 'invalid' };
     }
   }
 }

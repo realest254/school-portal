@@ -43,6 +43,16 @@ class InviteService {
     const response = await axios.post(`${this.apiUrl}/${inviteId}/cancel`);
     return response.data;
   }
+
+  /**
+   * Validate encrypted invite token
+   * @param {string} token - Encrypted token from invite URL
+   * @returns {Promise<Object>} Validation result with invite details
+   */
+  async validateToken(token) {
+    const response = await axios.post(`${this.apiUrl}/validate-token`, { token });
+    return response.data;
+  }
 }
 
 export const inviteService = new InviteService();

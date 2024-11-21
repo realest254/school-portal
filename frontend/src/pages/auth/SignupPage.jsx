@@ -23,17 +23,8 @@ const SignupPage = () => {
           return;
         }
 
-        // Decrypt the invite ID
-        let inviteId;
-        try {
-          inviteId = decrypt(token);
-        } catch (error) {
-          setError('Invalid invite link');
-          return;
-        }
-
-        // Check invite validity
-        const { valid, reason, invite } = await authService.checkInviteValidity(inviteId);
+        // Send the encrypted token to backend for validation
+        const { valid, reason, invite } = await authService.checkInviteToken(token);
         
         if (!valid) {
           switch (reason) {
