@@ -306,15 +306,21 @@ class AuthService {
   async acceptInvite(email, password, inviteId) {
     try {
       // Check invite validity first
-      const { valid, reason } = await this.checkInviteValidity(inviteId);
+      const { valid, reason, invite } = await this.checkInviteValidity(inviteId);
       if (!valid) {
         throw new Error(`Invalid invite: ${reason}`);
       }
 
-      // Create the user account
+      // Create the user account with role in metadata
       const { data: authData, error: signUpError } = await this.supabase.auth.signUp({
         email,
         password,
+        options: {
+          data: {
+            role: invite.role,
+            invited_by: invite.invited_by
+          }
+        }
       });
 
       if (signUpError) throw signUpError;
@@ -322,7 +328,11 @@ class AuthService {
       // Mark the invite as used
       await inviteService.markInviteAsUsed(inviteId);
 
-      return authData;
+      // Return auth data with role
+      return {
+        ...authData,
+        role: invite.role
+      };
     } catch (error) {
       console.error('Error accepting invite:', error);
       throw error;

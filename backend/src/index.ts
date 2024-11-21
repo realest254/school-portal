@@ -6,6 +6,7 @@ import adminRoutes from './routes/admin.routes';
 import profileRoutes from './routes/profile.routes';
 import teacherRoutes from './routes/teacher.routes';
 import inviteRoutes from './routes/invite.routes';
+import subjectRoutes from './routes/subject.routes';
 import { errorHandler, notFoundHandler } from './middlewares/error.middleware';
 import { rateLimiter, securityHeaders, compressionMiddleware } from './middlewares/security.middleware';
 
@@ -35,6 +36,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/profiles', profileRoutes);
 app.use('/api/teachers', teacherRoutes);
 app.use('/api/invites', inviteRoutes);
+app.use('/api/subjects', subjectRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {

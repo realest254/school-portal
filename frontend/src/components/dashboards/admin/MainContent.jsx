@@ -7,6 +7,7 @@ import IndisciplinePage from '../../../pages/Admin/IndisciplinePage';
 import ReportsPage from '../../../pages/Admin/ReportsPage';
 import NotificationsPage from '../../../pages/Admin/NotificationsPage';
 import SettingsPage from '../../../pages/Admin/SettingsPage';
+import SubjectsPage from '../../../pages/admin/Subjects';
 
 const MainContent = () => {
   return (
@@ -15,6 +16,7 @@ const MainContent = () => {
       <Route path="/settings" element={<SettingsPage />} />
       <Route path="/students" element={<StudentsPage/>} />
       <Route path="/teachers" element={<TeachersPage />} />
+      <Route path="/subjects" element={<SubjectsPage />} />
       <Route path="/discipline" element={<IndisciplinePage />} />
       <Route path="/notifications" element={<NotificationsPage />} />
       <Route path="/reports" element={<ReportsPage />} />

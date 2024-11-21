@@ -1,20 +1,8 @@
 import { Pool } from 'pg';
 import SQL from 'sql-template-strings';
-import { z } from 'zod';
 import pool from '../db';
-import { UserRole } from '../middlewares/auth.middleware';
-
-// Validation schemas
-const UUIDSchema = z.string().uuid();
-const EmailSchema = z.string().email();
-const RoleSchema = z.enum(['admin', 'teacher', 'student']);
-const StatusSchema = z.enum(['pending', 'accepted', 'expired']);
-
-interface InviteFilters {
-  role?: UserRole;
-  status?: string;
-  email?: string;
-}
+import { CreateInviteSchema, InviteSchema } from '../models/invite.model';
+import { emailService } from './email.service';
 
 export class InviteService {
   private db: Pool;
@@ -23,25 +11,169 @@ export class InviteService {
     this.db = pool;
   }
 
-  private validateFilters(filters: InviteFilters) {
-    if (filters.role) {
-      RoleSchema.parse(filters.role);
-    }
-    if (filters.status) {
-      StatusSchema.parse(filters.status);
-    }
-    if (filters.email) {
-      EmailSchema.parse(filters.email);
+  async validateEmailDomain(email: string, role: string): Promise<{ valid: boolean; message?: string }> {
+    try {
+      CreateInviteSchema.parse({ email, role });
+
+      if (role === 'teacher' || role === 'admin') {
+        const domain = email.split('@')[1];
+        const allowedDomains = ['school.edu', 'district.edu'];
+        if (!allowedDomains.includes(domain)) {
+          return {
+            valid: false,
+            message: `Teachers and admins must use an email from: ${allowedDomains.join(', ')}`
+          };
+        }
+      }
+
+      return { valid: true };
+    } catch (error) {
+      return {
+        valid: false,
+        message: error instanceof Error ? error.message : 'Invalid email or role'
+      };
     }
   }
 
-  async getAll(page: number, limit: number, filters: InviteFilters = {}): Promise<{ invites: any[]; total: number }> {
+  async checkInviteSpam(email: string): Promise<{ isSpam: boolean; message?: string }> {
+    const client = await this.db.connect();
     try {
-      // Validate inputs
-      z.number().positive().parse(page);
-      z.number().positive().max(100).parse(limit);
-      this.validateFilters(filters);
+      const result = await client.query(SQL`
+        SELECT COUNT(*) 
+        FROM invites 
+        WHERE email = ${email} 
+        AND created_at > NOW() - INTERVAL '24 hours'
+      `);
+      
+      const count = parseInt(result.rows[0].count);
+      if (count >= 3) {
+        return {
+          isSpam: true,
+          message: 'Too many invite attempts. Please try again later.'
+        };
+      }
+      
+      return { isSpam: false };
+    } finally {
+      client.release();
+    }
+  }
 
+  async createInvite(data: { email: string; role: string; invited_by: string }): Promise<any> {
+    const client = await this.db.connect();
+    try {
+      await client.query('BEGIN');
+      
+      const expiration_date = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+      
+      const result = await client.query(SQL`
+        INSERT INTO invites (
+          email, role, status, invited_by, expiration_date
+        ) VALUES (
+          ${data.email}, ${data.role}, 'pending', ${data.invited_by}, ${expiration_date}
+        ) RETURNING *
+      `);
+      
+      // Send invite email using Supabase
+      await emailService.sendInviteEmail(
+        data.email,
+        data.role,
+        result.rows[0].id,
+        process.env.FRONTEND_URL || 'http://localhost:3000'
+      );
+      
+      await client.query('COMMIT');
+      return result.rows[0];
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async resendInvite(email: string, invited_by: string): Promise<any> {
+    const client = await this.db.connect();
+    try {
+      await client.query('BEGIN');
+      
+      await client.query(SQL`
+        UPDATE invites 
+        SET status = 'expired' 
+        WHERE email = ${email} 
+        AND status = 'pending'
+      `);
+      
+      const expiration_date = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+      const result = await client.query(SQL`
+        INSERT INTO invites (
+          email, role, status, invited_by, expiration_date
+        )
+        SELECT 
+          email, role, 'pending', ${invited_by}, ${expiration_date}
+        FROM invites 
+        WHERE email = ${email} 
+        ORDER BY created_at DESC 
+        LIMIT 1
+        RETURNING *
+      `);
+
+      // Resend invite email using Supabase
+      await emailService.sendInviteEmail(
+        email,
+        result.rows[0].role,
+        result.rows[0].id,
+        process.env.FRONTEND_URL || 'http://localhost:3000'
+      );
+      
+      await client.query('COMMIT');
+      return result.rows[0];
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async getInviteHistory(email: string): Promise<any[]> {
+    const result = await this.db.query(SQL`
+      SELECT * FROM invites 
+      WHERE email = ${email} 
+      ORDER BY created_at DESC
+    `);
+    return result.rows;
+  }
+
+  async checkInviteValidity(id: string): Promise<{ valid: boolean; message?: string }> {
+    const result = await this.db.query(SQL`
+      SELECT * FROM invites 
+      WHERE id = ${id} 
+      AND status = 'pending' 
+      AND expiration_date > NOW()
+    `);
+    
+    if (result.rows.length === 0) {
+      return {
+        valid: false,
+        message: 'Invite is invalid or has expired'
+      };
+    }
+    
+    return { valid: true };
+  }
+
+  async markInviteAsUsed(id: string): Promise<void> {
+    await this.db.query(SQL`
+      UPDATE invites 
+      SET status = 'accepted', 
+          accepted_at = NOW() 
+      WHERE id = ${id}
+    `);
+  }
+
+  async getAll(page: number, limit: number, filters: { role?: string; status?: string; email?: string } = {}): Promise<{ invites: any[]; total: number }> {
+    try {
       const offset = (page - 1) * limit;
       const query = SQL`SELECT * FROM invites WHERE 1=1`;
 
@@ -57,11 +189,9 @@ export class InviteService {
         query.append(SQL` AND email = ${filters.email}`);
       }
 
-      // Get total count
       const countQuery = SQL`SELECT COUNT(*) FROM (${query}) AS count`;
       const { rows: [{ count }] } = await this.db.query(countQuery);
 
-      // Add pagination
       query.append(SQL` ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}`);
       const { rows: invites } = await this.db.query(query);
 
@@ -69,17 +199,13 @@ export class InviteService {
         invites,
         total: parseInt(count)
       };
-    } catch (error: any) {
-      const message = error instanceof Error ? error.message : 'Failed to get invites';
-      throw new Error(`Failed to get invites: ${message}`);
+    } catch (error) {
+      throw new Error(error instanceof Error ? error.message : 'Failed to get invites');
     }
   }
 
   async getById(id: string): Promise<any> {
     try {
-      // Validate UUID
-      UUIDSchema.parse(id);
-
       const query = SQL`
         SELECT * FROM invites 
         WHERE id = ${id}
@@ -87,59 +213,8 @@ export class InviteService {
       
       const { rows: [invite] } = await this.db.query(query);
       return invite || null;
-    } catch (error: any) {
-      const message = error instanceof Error ? error.message : 'Failed to get invite';
-      throw new Error(`Failed to get invite: ${message}`);
-    }
-  }
-
-  async createInvite(data: any): Promise<any> {
-    const client = await this.db.connect();
-    try {
-      await client.query('BEGIN');
-
-      // Validate input data
-      const InviteSchema = z.object({
-        email: EmailSchema,
-        role: RoleSchema,
-        expiration_date: z.date().optional(),
-        invited_by: UUIDSchema
-      });
-
-      InviteSchema.parse(data);
-
-      // Check if active invite exists
-      const existingInviteQuery = SQL`
-        SELECT * FROM invites 
-        WHERE email = ${data.email}
-        AND status = 'pending' 
-        AND (expiration_date IS NULL OR expiration_date > NOW())
-      `;
-
-      const { rows: [existingInvite] } = await client.query(existingInviteQuery);
-      if (existingInvite) {
-        throw new Error('Active invite already exists for this email');
-      }
-
-      const query = SQL`
-        INSERT INTO invites (
-          email, role, expiration_date, invited_by, status
-        ) VALUES (
-          ${data.email}, ${data.role}, ${data.expiration_date}, 
-          ${data.invited_by}, 'pending'
-        )
-        RETURNING *
-      `;
-
-      const { rows: [invite] } = await client.query(query);
-      await client.query('COMMIT');
-      return invite;
-    } catch (error: any) {
-      await client.query('ROLLBACK');
-      const message = error instanceof Error ? error.message : 'Failed to create invite';
-      throw new Error(`Failed to create invite: ${message}`);
-    } finally {
-      client.release();
+    } catch (error) {
+      throw new Error(error instanceof Error ? error.message : 'Failed to get invite');
     }
   }
 
@@ -148,16 +223,11 @@ export class InviteService {
     try {
       await client.query('BEGIN');
 
-      // Validate inputs
-      UUIDSchema.parse(id);
-      UUIDSchema.parse(userId);
-
-      // Get and validate invite
       const inviteQuery = SQL`
         SELECT * FROM invites 
         WHERE id = ${id}
         AND status = 'pending' 
-        AND (expiration_date IS NULL OR expiration_date > NOW())
+        AND expiration_date > NOW()
       `;
 
       const { rows: [invite] } = await client.query(inviteQuery);
@@ -165,7 +235,6 @@ export class InviteService {
         throw new Error('Invalid or expired invite');
       }
 
-      // Update invite status
       const updateQuery = SQL`
         UPDATE invites 
         SET status = 'accepted',
@@ -178,10 +247,9 @@ export class InviteService {
       const { rows: [updatedInvite] } = await client.query(updateQuery);
       await client.query('COMMIT');
       return updatedInvite;
-    } catch (error: any) {
+    } catch (error) {
       await client.query('ROLLBACK');
-      const message = error instanceof Error ? error.message : 'Failed to accept invite';
-      throw new Error(`Failed to accept invite: ${message}`);
+      throw new Error(error instanceof Error ? error.message : 'Failed to accept invite');
     } finally {
       client.release();
     }
@@ -192,9 +260,6 @@ export class InviteService {
     try {
       await client.query('BEGIN');
 
-      // Validate UUID
-      UUIDSchema.parse(id);
-
       const query = SQL`
         UPDATE invites 
         SET status = 'expired' 
@@ -204,10 +269,9 @@ export class InviteService {
 
       await client.query(query);
       await client.query('COMMIT');
-    } catch (error: any) {
+    } catch (error) {
       await client.query('ROLLBACK');
-      const message = error instanceof Error ? error.message : 'Failed to cancel invite';
-      throw new Error(`Failed to cancel invite: ${message}`);
+      throw new Error(error instanceof Error ? error.message : 'Failed to cancel invite');
     } finally {
       client.release();
     }

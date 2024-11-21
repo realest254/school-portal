@@ -12,7 +12,7 @@ const ClassSchema = z.string();
 interface StudentFilters {
   status?: string;
   class?: string;
-  search?: string;
+  search?: string;  // Will match against name, email, or admissionNumber
   page?: number;
   limit?: number;
 }
@@ -36,6 +36,13 @@ interface UpdateStudentData {
   status?: 'active' | 'inactive';
 }
 
+interface GetStudentIdentifier {
+  id?: string;
+  admissionNumber?: string;
+  email?: string;
+  name?: string;
+}
+
 export class StudentService {
   private static validateFilters(filters: StudentFilters) {
     if (filters.status) {
@@ -57,19 +64,37 @@ export class StudentService {
       // Validate filters
       this.validateFilters(filters);
 
-      const query = SQL`SELECT * FROM students WHERE 1=1`;
+      const query = SQL`
+        SELECT 
+          s.id,
+          s.name,
+          s.email,
+          s.admission_number as "admissionNumber",
+          s.class,
+          s.parent_phone as "parentPhone",
+          s.dob,
+          s.status,
+          s.created_at as "createdAt",
+          s.updated_at as "updatedAt"
+        FROM students s
+        WHERE 1=1
+      `;
 
       if (filters.status) {
-        query.append(SQL` AND status = ${filters.status}`);
+        query.append(SQL` AND s.status = ${filters.status}`);
       }
 
       if (filters.class) {
-        query.append(SQL` AND class = ${filters.class}`);
+        query.append(SQL` AND s.class = ${filters.class}`);
       }
 
       if (filters.search) {
         const searchPattern = `%${filters.search}%`;
-        query.append(SQL` AND (name ILIKE ${searchPattern} OR email ILIKE ${searchPattern} OR admission_number ILIKE ${searchPattern})`);
+        query.append(SQL` AND (
+          s.name ILIKE ${searchPattern} OR 
+          s.email ILIKE ${searchPattern} OR 
+          s.admission_number ILIKE ${searchPattern}
+        )`);
       }
 
       // Get total count
@@ -81,36 +106,64 @@ export class StudentService {
       const limit = filters.limit || 10;
       const offset = (page - 1) * limit;
 
-      query.append(SQL` ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}`);
+      query.append(SQL` ORDER BY s.created_at DESC LIMIT ${limit} OFFSET ${offset}`);
 
       const { rows: students } = await pool.query(query);
 
       return {
         students,
-        total: parseInt(count),
-        page,
-        limit,
-        totalPages: Math.ceil(parseInt(count) / limit)
+        pagination: {
+          total: parseInt(count),
+          page,
+          limit
+        }
       };
     } catch (error) {
-      logError(error, 'StudentService.getStudents');
+      logError('Error in getStudents:', error instanceof Error ? error.message : String(error));
       throw error;
     }
   }
 
-  static async getStudentById(id: string) {
+  static async getStudentByIdentifier(identifier: GetStudentIdentifier) {
     try {
-      // Validate UUID
-      UUIDSchema.parse(id);
+      if (!identifier.id && !identifier.admissionNumber && !identifier.email && !identifier.name) {
+        throw new Error('At least one identifier (id, admissionNumber, email, or name) must be provided');
+      }
 
       const query = SQL`
-        SELECT * FROM students 
-        WHERE id = ${id}
+        SELECT 
+          s.id,
+          s.name,
+          s.email,
+          s.admission_number as "admissionNumber",
+          s.class,
+          s.parent_phone as "parentPhone",
+          s.dob,
+          s.status,
+          s.created_at as "createdAt",
+          s.updated_at as "updatedAt"
+        FROM students s
+        WHERE 1=1
       `;
+
+      if (identifier.id) {
+        UUIDSchema.parse(identifier.id);
+        query.append(SQL` AND s.id = ${identifier.id}`);
+      }
+      if (identifier.admissionNumber) {
+        query.append(SQL` AND s.admission_number = ${identifier.admissionNumber}`);
+      }
+      if (identifier.email) {
+        query.append(SQL` AND s.email = ${identifier.email}`);
+      }
+      if (identifier.name) {
+        query.append(SQL` AND s.name = ${identifier.name}`);
+      }
+
       const { rows: [student] } = await pool.query(query);
       return student;
     } catch (error) {
-      logError(error, 'StudentService.getStudentById');
+      logError('Error in getStudentByIdentifier:', error instanceof Error ? error.message : String(error));
       throw error;
     }
   }
@@ -120,7 +173,6 @@ export class StudentService {
     try {
       await client.query('BEGIN');
 
-      // Validate input data
       const StudentSchema = z.object({
         name: z.string(),
         admissionNumber: z.string(),
@@ -139,17 +191,17 @@ export class StudentService {
           ${data.name}, ${data.admissionNumber}, ${data.email}, 
           ${data.class}, ${data.parentPhone}, ${data.dob}, 'active'
         )
-        RETURNING *
+        RETURNING id
       `;
 
       const { rows: [student] } = await client.query(query);
       await client.query('COMMIT');
 
       logInfo(`Created student: ${student.id}`);
-      return student;
+      return await this.getStudentByIdentifier({ id: student.id });
     } catch (error) {
       await client.query('ROLLBACK');
-      logError(error, 'StudentService.createStudent');
+      logError('Error in createStudent:', error instanceof Error ? error.message : String(error));
       throw error;
     } finally {
       client.release();
@@ -157,14 +209,12 @@ export class StudentService {
   }
 
   static async updateStudent(id: string, data: UpdateStudentData) {
-    // Validate UUID
     UUIDSchema.parse(id);
 
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
 
-      // Validate update data
       const UpdateStudentSchema = z.object({
         name: z.string().optional(),
         admissionNumber: z.string().optional(),
@@ -218,17 +268,17 @@ export class StudentService {
         UPDATE students 
         SET ${setClause} 
         WHERE id = ${id}
-        RETURNING *
+        RETURNING id
       `;
 
       const { rows: [student] } = await client.query(query);
       await client.query('COMMIT');
 
       logInfo(`Updated student: ${id}`);
-      return student;
+      return await this.getStudentByIdentifier({ id: student.id });
     } catch (error) {
       await client.query('ROLLBACK');
-      logError(error, 'StudentService.updateStudent');
+      logError('Error in updateStudent:', error instanceof Error ? error.message : String(error));
       throw error;
     } finally {
       client.release();
@@ -237,22 +287,22 @@ export class StudentService {
 
   static async deleteStudent(id: string) {
     try {
-      // Validate UUID
       UUIDSchema.parse(id);
 
       const query = SQL`
         DELETE FROM students 
         WHERE id = ${id} 
-        RETURNING *
+        RETURNING id
       `;
+      
       const { rows: [student] } = await pool.query(query);
-
+      
       if (student) {
         logInfo(`Deleted student: ${id}`);
       }
       return student;
     } catch (error) {
-      logError(error, 'StudentService.deleteStudent');
+      logError('Error in deleteStudent:', error instanceof Error ? error.message : String(error));
       throw error;
     }
   }

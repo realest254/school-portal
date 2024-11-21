@@ -194,3 +194,92 @@ export const notificationValidation = {
     query('limit').optional().isInt({ min: 1, max: 100 }).toInt()
   ]
 };
+
+export const classValidation = {
+  validateCreate: [
+    body('name')
+      .trim()
+      .notEmpty()
+      .withMessage('Class name is required')
+      .isLength({ max: 100 })
+      .withMessage('Class name must be at most 100 characters'),
+  ],
+};
+
+export const subjectValidation = {
+  validateCreate: [
+    body('name')
+      .trim()
+      .notEmpty()
+      .withMessage('Subject name is required')
+      .isLength({ max: 100 })
+      .withMessage('Subject name must be at most 100 characters'),
+    body('description')
+      .optional()
+      .trim()
+      .isLength({ max: 500 })
+      .withMessage('Description must be at most 500 characters'),
+    body('gradeLevel')
+      .optional()
+      .isInt({ min: 1, max: 12 })
+      .withMessage('Grade level must be between 1 and 12')
+  ],
+  validateUpdate: [
+    param('id').isUUID().withMessage('Invalid subject ID'),
+    body('name')
+      .optional()
+      .trim()
+      .isLength({ max: 100 })
+      .withMessage('Subject name must be at most 100 characters'),
+    body('description')
+      .optional()
+      .trim()
+      .isLength({ max: 500 })
+      .withMessage('Description must be at most 500 characters'),
+    body('gradeLevel')
+      .optional()
+      .isInt({ min: 1, max: 12 })
+      .withMessage('Grade level must be between 1 and 12')
+  ]
+};
+
+export const inviteValidation = {
+  validateCreate: [
+    body('email')
+      .trim()
+      .notEmpty()
+      .withMessage('Email is required')
+      .isEmail()
+      .withMessage('Invalid email format')
+      .normalizeEmail(),
+    body('role')
+      .notEmpty()
+      .withMessage('Role is required')
+      .isIn(['teacher', 'student', 'admin'])
+      .withMessage('Invalid role'),
+    body('expiresAt')
+      .optional()
+      .isISO8601()
+      .withMessage('Expiry date must be a valid date'),
+    body('metadata')
+      .optional()
+      .isObject()
+      .withMessage('Metadata must be an object')
+  ],
+  validateBulkCreate: [
+    body('invites')
+      .isArray()
+      .withMessage('Invites must be an array')
+      .custom((invites: any[]) => {
+        return invites.every(invite => {
+          return (
+            invite.email &&
+            typeof invite.email === 'string' &&
+            invite.role &&
+            ['teacher', 'student', 'admin'].includes(invite.role)
+          );
+        });
+      })
+      .withMessage('Invalid invites format')
+  ]
+};

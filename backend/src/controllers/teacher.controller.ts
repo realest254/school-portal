@@ -1,152 +1,99 @@
 import { Request, Response } from 'express';
-import { logError, logInfo } from '../utils/logger';
-import { AuthenticatedRequest } from '../middlewares/adminAuth.middleware';
-import { validationResult } from 'express-validator';
 import { TeacherService } from '../services/teacher.service';
+import { logError } from '../utils/logger';
 
 export class TeacherController {
-  /**
-   * Get all teachers with optional filters
-   */
-  static async getAllTeachers(req: Request, res: Response) {
+  static async getTeachers(req: Request, res: Response) {
     try {
-      const { status, subject, search, page = 1, limit = 10 } = req.query;
+      const filters = {
+        status: req.query.status as string,
+        subjectId: req.query.subjectId as string,
+        search: req.query.search as string,
+        page: req.query.page ? parseInt(req.query.page as string) : undefined,
+        limit: req.query.limit ? parseInt(req.query.limit as string) : undefined
+      };
 
-      const teachers = await TeacherService.getTeachers({
-        status: status as string,
-        subject: subject as string,
-        search: search as string,
-        page: Number(page),
-        limit: Number(limit)
-      });
-
-      logInfo('Teachers fetched successfully', { count: teachers.total });
-
-      return res.status(200).json(teachers);
+      const result = await TeacherService.getTeachers(filters);
+      res.json(result);
     } catch (error) {
-      logError(error, 'getAllTeachers');
-      return res.status(500).json({ error: 'Failed to fetch teachers' });
+      logError(error, 'TeacherController.getTeachers');
+      res.status(500).json({ error: 'Failed to retrieve teachers' });
     }
   }
 
-  /**
-   * Get teacher by ID
-   */
   static async getTeacherById(req: Request, res: Response) {
     try {
-      const { id } = req.params;
-      const teacher = await TeacherService.getTeacherById(id);
-
+      const teacher = await TeacherService.getTeacherById(req.params.id);
       if (!teacher) {
         return res.status(404).json({ error: 'Teacher not found' });
       }
-
-      return res.status(200).json(teacher);
+      res.json(teacher);
     } catch (error) {
-      logError(error, 'getTeacherById');
-      return res.status(500).json({ error: 'Failed to fetch teacher' });
+      logError(error, 'TeacherController.getTeacherById');
+      res.status(500).json({ error: 'Failed to retrieve teacher' });
     }
   }
 
-  /**
-   * Create a new teacher
-   */
-  static async createTeacher(req: AuthenticatedRequest, res: Response) {
+  static async createTeacher(req: Request, res: Response) {
     try {
-      const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        return res.status(400).json({ errors: errors.array() });
-      }
-
-      const { name, employeeId, email, subject, phone, joinDate } = req.body;
-
       const teacher = await TeacherService.createTeacher({
-        name,
-        employeeId,
-        email,
-        subject,
-        phone,
-        joinDate
+        name: req.body.name,
+        email: req.body.email,
+        phone: req.body.phone,
+        subjectIds: req.body.subjectIds,
+        employeeId: req.body.employeeId,
+        joinDate: req.body.joinDate
       });
-
-      logInfo('Teacher created successfully', { teacherId: teacher.id });
-
-      return res.status(201).json({
-        message: 'Teacher created successfully',
-        teacher
-      });
+      res.status(201).json(teacher);
     } catch (error) {
-      logError(error, 'createTeacher');
-      if (error.message.includes('already exists')) {
-        return res.status(400).json({ error: error.message });
+      logError(error, 'TeacherController.createTeacher');
+      if (error instanceof Error) {
+        if (error.message.includes('subject')) {
+          return res.status(400).json({ error: error.message });
+        }
       }
-      return res.status(500).json({ error: 'Failed to create teacher' });
+      res.status(500).json({ error: 'Failed to create teacher' });
     }
   }
 
-  /**
-   * Update teacher details
-   */
   static async updateTeacher(req: Request, res: Response) {
     try {
-      const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        return res.status(400).json({ errors: errors.array() });
-      }
-
-      const { id } = req.params;
-      const { name, employeeId, email, subject, phone, joinDate, status } = req.body;
-
-      const teacher = await TeacherService.updateTeacher(id, {
-        name,
-        employeeId,
-        email,
-        subject,
-        phone,
-        joinDate,
-        status
+      const teacher = await TeacherService.updateTeacher(req.params.id, {
+        name: req.body.name,
+        email: req.body.email,
+        phone: req.body.phone,
+        subjectIds: req.body.subjectIds,
+        employeeId: req.body.employeeId,
+        joinDate: req.body.joinDate,
+        status: req.body.status
       });
 
       if (!teacher) {
         return res.status(404).json({ error: 'Teacher not found' });
       }
 
-      logInfo('Teacher updated successfully', { teacherId: id });
-
-      return res.status(200).json({
-        message: 'Teacher updated successfully',
-        teacher
-      });
+      res.json(teacher);
     } catch (error) {
-      logError(error, 'updateTeacher');
-      if (error.message.includes('already exists')) {
-        return res.status(400).json({ error: error.message });
+      logError(error, 'TeacherController.updateTeacher');
+      if (error instanceof Error) {
+        if (error.message.includes('subject')) {
+          return res.status(400).json({ error: error.message });
+        }
       }
-      return res.status(500).json({ error: 'Failed to update teacher' });
+      res.status(500).json({ error: 'Failed to update teacher' });
     }
   }
 
-  /**
-   * Delete a teacher
-   */
   static async deleteTeacher(req: Request, res: Response) {
     try {
-      const { id } = req.params;
-
-      const teacher = await TeacherService.deleteTeacher(id);
-
+      const teacher = await TeacherService.deleteTeacher(req.params.id);
       if (!teacher) {
         return res.status(404).json({ error: 'Teacher not found' });
       }
-
-      logInfo('Teacher deleted successfully', { teacherId: id });
-
-      return res.status(200).json({
-        message: 'Teacher deleted successfully'
-      });
+      res.json({ message: 'Teacher deleted successfully' });
     } catch (error) {
-      logError(error, 'deleteTeacher');
-      return res.status(500).json({ error: 'Failed to delete teacher' });
+      logError(error, 'TeacherController.deleteTeacher');
+      res.status(500).json({ error: 'Failed to delete teacher' });
     }
   }
 }

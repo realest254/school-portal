@@ -1,20 +1,31 @@
 import React from 'react';
-import { Form, Input, Button } from 'antd';
+import { Form, Input, Button, Select } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import { Search } from 'lucide-react';
 import { useTheme } from '../../../../../contexts/ThemeContext';
 
-const SearchAndFilterBar = ({ onSearch, onAddNew }) => {
+const SearchAndFilterBar = ({ onSearch, onAddNew, classes = [] }) => {
   const [form] = Form.useForm();
   const { isDarkMode } = useTheme();
 
   const handleSearch = () => {
     form.validateFields().then(values => {
-      const hasValue = Object.values(values).some(value => value && value.trim() !== '');
-      if (!hasValue) {
-        return;
+      const filters = {};
+      
+      // Search terms (will be combined in backend)
+      if (values.searchTerm) {
+        filters.search = values.searchTerm;
       }
-      onSearch(values);
+      
+      // Filters
+      if (values.class) {
+        filters.class = values.class;
+      }
+      if (values.status) {
+        filters.status = values.status;
+      }
+      
+      onSearch(filters);
     });
   };
 
@@ -23,47 +34,50 @@ const SearchAndFilterBar = ({ onSearch, onAddNew }) => {
     onSearch({});
   };
 
+  const inputStyle = {
+    backgroundColor: isDarkMode ? '#374151' : '#ffffff',
+    borderColor: isDarkMode ? '#4B5563' : '#D1D5DB'
+  };
+
+  const inputClass = `h-10 ${isDarkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-700'}`;
+
   return (
     <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 mb-6">
       <Form form={form} layout="vertical" className="w-full">
         <div className="flex flex-col gap-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            <Form.Item name="name" className="mb-0">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Combined search field */}
+            <Form.Item name="searchTerm" className="mb-0" label="Search">
               <Input
-                placeholder="Search by name"
+                placeholder="Search by name, email, or admission no."
                 prefix={<Search className="text-gray-400" size={18} />}
                 allowClear
-                className={`h-10 ${isDarkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-700'}`}
-                style={{
-                  backgroundColor: isDarkMode ? '#374151' : '#ffffff',
-                  borderColor: isDarkMode ? '#4B5563' : '#D1D5DB'
-                }}
+                className={inputClass}
+                style={inputStyle}
               />
             </Form.Item>
             
-            <Form.Item name="admissionNumber" className="mb-0">
-              <Input
-                placeholder="Search by admission no."
-                prefix={<Search className="text-gray-400" size={18} />}
+            {/* Filters */}
+            <Form.Item name="class" className="mb-0" label="Class Filter">
+              <Select
+                placeholder="Filter by class"
                 allowClear
-                className={`h-10 ${isDarkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-700'}`}
-                style={{
-                  backgroundColor: isDarkMode ? '#374151' : '#ffffff',
-                  borderColor: isDarkMode ? '#4B5563' : '#D1D5DB'
-                }}
+                className={inputClass}
+                style={inputStyle}
+                options={classes.map(c => ({ label: c, value: c }))}
               />
             </Form.Item>
 
-            <Form.Item name="class" className="mb-0">
-              <Input
-                placeholder="Search by class"
-                prefix={<Search className="text-gray-400" size={18} />}
+            <Form.Item name="status" className="mb-0" label="Status">
+              <Select
+                placeholder="Filter by status"
                 allowClear
-                className={`h-10 ${isDarkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-700'}`}
-                style={{
-                  backgroundColor: isDarkMode ? '#374151' : '#ffffff',
-                  borderColor: isDarkMode ? '#4B5563' : '#D1D5DB'
-                }}
+                className={inputClass}
+                style={inputStyle}
+                options={[
+                  { label: 'Active', value: 'active' },
+                  { label: 'Inactive', value: 'inactive' }
+                ]}
               />
             </Form.Item>
           </div>
@@ -72,10 +86,7 @@ const SearchAndFilterBar = ({ onSearch, onAddNew }) => {
             <Button
               onClick={handleReset}
               className={`${isDarkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-700'}`}
-              style={{
-                backgroundColor: isDarkMode ? '#374151' : '#ffffff',
-                borderColor: isDarkMode ? '#4B5563' : '#D1D5DB'
-              }}
+              style={inputStyle}
             >
               Reset
             </Button>

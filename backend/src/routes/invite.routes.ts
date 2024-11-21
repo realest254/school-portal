@@ -1,35 +1,37 @@
 import { Router } from 'express';
+import { verifyToken, requireRole, UserRole } from '../middlewares/auth.middleware';
 import { InviteController } from '../controllers/invite.controller';
-import { authMiddleware } from '../middlewares/auth.middleware';
-import { roleMiddleware } from '../middlewares/role.middleware';
+import { RequestHandler } from 'express';
 
 const router = Router();
-const inviteController = new InviteController();
+const inviteController = InviteController.getInstance();
 
-// Create a single invite (admin/teacher only)
-router.post(
-  '/',
-  authMiddleware,
-  roleMiddleware(['admin', 'teacher']),
-  inviteController.createInvite
-);
+// Apply authentication middleware
+router.use(verifyToken);
+router.use(requireRole(UserRole.ADMIN));
 
-// Create multiple invites (admin/teacher only)
-router.post(
-  '/bulk',
-  authMiddleware,
-  roleMiddleware(['admin', 'teacher']),
-  inviteController.createBulkInvites
-);
+// Create invite
+router.post('/', (inviteController.createInvite as RequestHandler));
 
-// Check invite validity (public)
-router.get('/:id/check', inviteController.checkInvite);
+// Create bulk invites
+router.post('/bulk', (inviteController.createBulkInvites as RequestHandler));
 
-// Mark invite as used (requires auth)
-router.post(
-  '/:id/use',
-  authMiddleware,
-  inviteController.markInviteAsUsed
-);
+// Check invite validity
+router.get('/:id/check', (inviteController.checkInviteValidity as RequestHandler));
+
+// Mark invite as used
+router.post('/:id/use', (inviteController.markInviteAsUsed as RequestHandler));
+
+// Validate email domain
+router.post('/validate-domain', (inviteController.validateEmailDomain as RequestHandler));
+
+// Check invite spam
+router.post('/check-spam', (inviteController.checkInviteSpam as RequestHandler));
+
+// Resend invite
+router.post('/resend', (inviteController.resendInvite as RequestHandler));
+
+// Get invite history
+router.get('/history/:email', (inviteController.getInviteHistory as RequestHandler));
 
 export default router;

@@ -1,133 +1,139 @@
 import React, { useState, useEffect } from 'react';
+import { message } from 'antd';
 import TeacherListTable from './TeacherListTable';
 import SearchAndFilterBar from './SearchAndFilterBar';
 import AddTeacherModal from './AddTeacherModal';
 import EditTeacherModal from './EditTeacherModal';
 import DeleteTeacherModal from './DeleteTeacherModal';
-
-// TODO: Replace with actual API calls
-const mockSubjects = [
-  'Mathematics',
-  'Physics',
-  'Chemistry',
-  'Biology',
-  'English',
-  'History',
-  'Geography',
-  'Computer Science',
-];
+import axios from 'axios';
 
 const TeachersManagement = () => {
   const [teachers, setTeachers] = useState([]);
-  const [filteredTeachers, setFilteredTeachers] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [pagination, setPagination] = useState({
+    current: 1,
+    pageSize: 10,
+    total: 0
+  });
+  
+  // Modal states
   const [isAddModalVisible, setIsAddModalVisible] = useState(false);
   const [isEditModalVisible, setIsEditModalVisible] = useState(false);
   const [isDeleteModalVisible, setIsDeleteModalVisible] = useState(false);
   const [selectedTeacher, setSelectedTeacher] = useState(null);
-  const [searchQuery, setSearchQuery] = useState('');
+  
+  // Current filters state
+  const [currentFilters, setCurrentFilters] = useState({});
 
+  // Load teachers when filters or pagination changes
   useEffect(() => {
-    // TODO: Replace with actual API call
-    // Fetch teachers data
-    const mockTeachers = [
-      {
-        id: 1,
-        name: 'John Doe',
-        email: 'john.doe@school.com',
-        class: '10A',
-        subjects: ['Mathematics', 'Physics'],
-      },
-      // Add more mock data as needed
-    ];
-    setTeachers(mockTeachers);
-    setFilteredTeachers(mockTeachers);
-  }, []);
+    loadTeachers();
+  }, [currentFilters, pagination.current, pagination.pageSize]);
 
-  const handleSearch = (value) => {
-    setSearchQuery(value);
-    const filtered = teachers.filter((teacher) =>
-      teacher.name.toLowerCase().includes(value.toLowerCase()) ||
-      teacher.email.toLowerCase().includes(value.toLowerCase()) ||
-      teacher.class.toLowerCase().includes(value.toLowerCase()) ||
-      teacher.subjects.some(subject => 
-        subject.toLowerCase().includes(value.toLowerCase())
-      )
-    );
-    setFilteredTeachers(filtered);
+  const loadTeachers = async () => {
+    try {
+      setLoading(true);
+      const response = await axios.get('/api/teachers', {
+        params: {
+          ...currentFilters,
+          page: pagination.current,
+          limit: pagination.pageSize
+        }
+      });
+      
+      setTeachers(response.data.teachers);
+      setPagination(prev => ({
+        ...prev,
+        total: response.data.pagination.total
+      }));
+    } catch (error) {
+      message.error('Failed to load teachers');
+      console.error('Error loading teachers:', error);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleAddTeacher = (values) => {
-    // TODO: Replace with actual API call
-    const newTeacher = {
-      id: teachers.length + 1,
-      ...values,
-    };
-    setTeachers([...teachers, newTeacher]);
-    setFilteredTeachers([...teachers, newTeacher]);
-    setIsAddModalVisible(false);
-    message.success('Teacher added successfully');
+  const handleSearch = (filters) => {
+    setCurrentFilters(filters);
+    // Reset to first page when filters change
+    setPagination(prev => ({
+      ...prev,
+      current: 1
+    }));
   };
 
-  const handleEditTeacher = (values) => {
-    // TODO: Replace with actual API call
-    const updatedTeachers = teachers.map((teacher) =>
-      teacher.id === values.id ? values : teacher
-    );
-    setTeachers(updatedTeachers);
-    setFilteredTeachers(updatedTeachers);
-    setIsEditModalVisible(false);
-    message.success('Teacher updated successfully');
+  const handleTableChange = (pagination, filters, sorter) => {
+    setPagination(prev => ({
+      ...prev,
+      current: pagination.current,
+      pageSize: pagination.pageSize
+    }));
+  };
+
+  const handleAddTeacher = () => {
+    setIsAddModalVisible(true);
+  };
+
+  const handleEditTeacher = (teacher) => {
+    setSelectedTeacher(teacher);
+    setIsEditModalVisible(true);
   };
 
   const handleDeleteTeacher = (teacher) => {
-    // TODO: Replace with actual API call
-    const updatedTeachers = teachers.filter((t) => t.id !== teacher.id);
-    setTeachers(updatedTeachers);
-    setFilteredTeachers(updatedTeachers);
+    setSelectedTeacher(teacher);
+    setIsDeleteModalVisible(true);
+  };
+
+  const handleModalClose = (shouldRefresh = false) => {
+    setIsAddModalVisible(false);
+    setIsEditModalVisible(false);
     setIsDeleteModalVisible(false);
-    message.success('Teacher deleted successfully');
+    setSelectedTeacher(null);
+    
+    if (shouldRefresh) {
+      loadTeachers();
+    }
   };
 
   return (
-    <div className="space-y-4">
-      <SearchAndFilterBar
+    <div className="p-6">
+      <SearchAndFilterBar 
         onSearch={handleSearch}
-        onAddNew={() => setIsAddModalVisible(true)}
+        onAddNew={handleAddTeacher}
       />
       
-      <TeacherListTable
-        teachers={filteredTeachers}
-        onEdit={(teacher) => {
-          setSelectedTeacher(teacher);
-          setIsEditModalVisible(true);
-        }}
-        onDelete={(teacher) => {
-          setSelectedTeacher(teacher);
-          setIsDeleteModalVisible(true);
-        }}
+      <TeacherListTable 
+        teachers={teachers}
+        loading={loading}
+        pagination={pagination}
+        onChange={handleTableChange}
+        onEdit={handleEditTeacher}
+        onDelete={handleDeleteTeacher}
       />
-
-      <AddTeacherModal
-        visible={isAddModalVisible}
-        onCancel={() => setIsAddModalVisible(false)}
-        onSubmit={handleAddTeacher}
-        subjects={mockSubjects}
-      />
-
-      <EditTeacherModal
-        visible={isEditModalVisible}
-        onCancel={() => setIsEditModalVisible(false)}
-        onSubmit={handleEditTeacher}
-        initialData={selectedTeacher}
-        subjects={mockSubjects}
-      />
-
-      <DeleteTeacherModal
-        visible={isDeleteModalVisible}
-        onCancel={() => setIsDeleteModalVisible(false)}
-        onConfirm={handleDeleteTeacher}
-        teacher={selectedTeacher}
-      />
+      
+      {isAddModalVisible && (
+        <AddTeacherModal 
+          visible={isAddModalVisible}
+          onClose={handleModalClose}
+        />
+      )}
+      
+      {isEditModalVisible && selectedTeacher && (
+        <EditTeacherModal 
+          visible={isEditModalVisible}
+          teacher={selectedTeacher}
+          onClose={handleModalClose}
+        />
+      )}
+      
+      {isDeleteModalVisible && selectedTeacher && (
+        <DeleteTeacherModal 
+          visible={isDeleteModalVisible}
+          teacher={selectedTeacher}
+          onClose={handleModalClose}
+        />
+      )}
     </div>
   );
 };

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Grid, Users, UserCheck, AlertTriangle, BarChart2, Settings, Bell } from 'lucide-react';
+import { Grid, Users, UserCheck, AlertTriangle, BarChart2, Settings, Bell, BookOpen } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 
 const Sidebar = ({ collapsed }) => {
@@ -7,6 +7,7 @@ const Sidebar = ({ collapsed }) => {
     { icon: <Grid size={20} />, label: 'Dashboard Overview', path: '/admin/overview' },
     { icon: <Users size={20} />, label: 'Students Management', path: '/admin/students' },
     { icon: <UserCheck size={20} />, label: 'Teachers Management', path: '/admin/teachers' },
+    { icon: <BookOpen size={20} />, label: 'Subjects Management', path: '/admin/subjects' },
     { icon: <AlertTriangle size={20} />, label: 'Indiscipline Cases', path: '/admin/discipline' },
     { icon: <Bell size={20} />, label: 'Notifications', path: '/admin/notifications' },
     { icon: <BarChart2 size={20} />, label: 'Reports and Stats', path: '/admin/reports' },
