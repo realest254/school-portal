@@ -92,143 +92,114 @@ export class StudentService {
     }
   }
 
-  async getStudents(filters: StudentFilters): Promise<PaginatedResult<Student>> {
+  async getStudents(filters: StudentFilters = {}): Promise<PaginatedResult<Student[]>> {
     try {
-      StudentService.validateFilters(filters);
-      
+      const query = SQL`
+        SELECT s.*, c.name as class_name 
+        FROM students s
+        LEFT JOIN classes c ON s.class_id = c.id
+        WHERE 1=1
+      `;
+
+      if (filters.status) {
+        query.append(SQL` AND s.status = ${filters.status}`);
+      }
+
+      if (filters.search) {
+        query.append(SQL` AND (
+          s.name ILIKE ${`%${filters.search}%`} OR
+          s.email ILIKE ${`%${filters.search}%`} OR
+          s.admission_number ILIKE ${`%${filters.search}%`}
+        )`);
+      }
+
+      if (filters.class) {
+        query.append(SQL` AND c.name = ${filters.class}`);
+      }
+
+      // Add ordering
+      query.append(SQL` ORDER BY s.name`);
+
+      // Add pagination
       const page = filters.page || 1;
       const limit = filters.limit || 10;
       const offset = (page - 1) * limit;
 
-      let query = SQL`SELECT * FROM students WHERE 1=1`;
-      
-      if (filters.status) {
-        query.append(SQL` AND status = ${filters.status}`);
-      }
-      
-      if (filters.class) {
-        query.append(SQL` AND class = ${filters.class}`);
-      }
-      
-      if (filters.search) {
-        const searchTerm = `%${filters.search}%`;
-        query.append(SQL` AND (
-          name ILIKE ${searchTerm} OR 
-          email ILIKE ${searchTerm} OR 
-          admission_number ILIKE ${searchTerm}
-        )`);
-      }
-
-      const countQuery = SQL`SELECT COUNT(*) FROM (${query}) as count`;
+      const countQuery = SQL`SELECT COUNT(*) FROM (${query}) as count_query`;
       const { rows: [{ count }] } = await pool.query(countQuery);
-      
-      query.append(SQL` ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}`);
+
+      query.append(SQL` LIMIT ${limit} OFFSET ${offset}`);
       const { rows } = await pool.query(query);
 
-      const students = rows.map(row => StudentSchema.parse(row));
-      const total = parseInt(count);
+      if (rows.length === 0 && filters.class) {
+        throw new ServiceError(`No students found in class: ${filters.class}`, 'NO_STUDENTS_FOUND', 404);
+      }
+
+      const students = rows.map(row => ({
+        ...row,
+        class: row.class_name // Map the joined class_name back to class for backward compatibility
+      }));
 
       return {
-        items: students,
-        total,
+        data: students,
+        total: parseInt(count),
         page,
-        limit,
-        totalPages: Math.ceil(total / limit)
+        limit
       };
     } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-      logError('Error fetching students:', errorMessage);
-      if (error instanceof z.ZodError) {
-        throw new ServiceError('Invalid filter parameters', 'INVALID_FILTERS', 400);
-      }
-      throw new ServiceError(
-        'Failed to fetch students',
-        'FETCH_STUDENTS_FAILED',
-        500
-      );
-    }
-  }
-
-  async getStudentById(id: string): Promise<ServiceResult<Student>> {
-    try {
-      const uuid = createUUID(id);
-      const query = SQL`
-        SELECT * FROM students 
-        WHERE id = ${uuid}
-      `;
-      
-      const { rows } = await pool.query(query);
-      if (rows.length === 0) {
-        throw new StudentNotFoundError(id);
-      }
-
-      const student = StudentSchema.parse(rows[0]);
-      return { success: true, data: student };
-    } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-      logError('Error fetching student:', errorMessage);
-      if (error instanceof StudentNotFoundError) {
+      if (error instanceof ServiceError) {
         throw error;
       }
-      if (error instanceof z.ZodError) {
-        throw new ServiceError('Invalid student data in database', 'INVALID_STUDENT_DATA', 500);
-      }
-      throw new ServiceError(
-        'Failed to fetch student',
-        'FETCH_STUDENT_FAILED',
-        500
-      );
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      logError('Error fetching students:', errorMessage);
+      throw new ServiceError('Failed to fetch students', 'FETCH_ERROR');
     }
   }
 
-  async getStudentByIdentifier(identifier: { id?: string; admissionNumber?: string; email?: string; name?: string }): Promise<ServiceResult<Student>> {
+  /**
+   * Get a student by identifier (id, admission number, or email)
+   */
+  async getStudentByIdentifier(identifier: { id?: string; admissionNumber?: string; email?: string }): Promise<ServiceResult<Student>> {
     try {
-      if (!identifier.id && !identifier.admissionNumber && !identifier.email && !identifier.name) {
-        throw new Error('At least one identifier (id, admissionNumber, email, or name) must be provided');
-      }
-
       const query = SQL`
-        SELECT * FROM students 
-        WHERE 1=1
+        SELECT s.*, c.name as class_name 
+        FROM students s
+        LEFT JOIN classes c ON s.class_id = c.id
+        WHERE 1=0
       `;
 
       if (identifier.id) {
-        const uuid = createUUID(identifier.id);
-        query.append(SQL` AND id = ${uuid}`);
+        query.append(SQL` OR s.id = ${identifier.id}`);
       }
       if (identifier.admissionNumber) {
-        query.append(SQL` AND admission_number = ${identifier.admissionNumber}`);
+        query.append(SQL` OR s.admission_number = ${identifier.admissionNumber}`);
       }
       if (identifier.email) {
-        const email = createEmail(identifier.email);
-        query.append(SQL` AND email = ${email}`);
-      }
-      if (identifier.name) {
-        query.append(SQL` AND name = ${identifier.name}`);
+        query.append(SQL` OR s.email = ${identifier.email}`);
       }
 
       const { rows } = await pool.query(query);
+
       if (rows.length === 0) {
-        const identifierValue = identifier.id || identifier.admissionNumber || identifier.email || identifier.name || 'unknown';
-        throw new StudentNotFoundError(identifierValue);
+        throw new StudentNotFoundError(Object.values(identifier)[0]);
       }
 
-      const student = StudentSchema.parse(rows[0]);
-      return { success: true, data: student };
+      const student = {
+        ...rows[0],
+        class: rows[0].class_name // Map the joined class_name back to class for backward compatibility
+      };
+
+      return {
+        success: true,
+        data: student
+      };
     } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-      logError('Error fetching student:', errorMessage);
       if (error instanceof StudentNotFoundError) {
         throw error;
       }
-      if (error instanceof z.ZodError) {
-        throw new ServiceError('Invalid student data in database', 'INVALID_STUDENT_DATA', 500);
-      }
-      throw new ServiceError(
-        'Failed to fetch student',
-        'FETCH_STUDENT_FAILED',
-        500
-      );
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      logError('Error fetching student by identifier:', errorMessage);
+      throw new ServiceError('Failed to fetch student', 'FETCH_ERROR');
     }
   }
 
@@ -236,6 +207,15 @@ export class StudentService {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+
+      // Get class_id from class name
+      const { rows: [classRow] } = await client.query(SQL`
+        SELECT id FROM classes WHERE name = ${data.class}
+      `);
+
+      if (!classRow) {
+        throw new ServiceError(`Class "${data.class}" not found`, 'CLASS_NOT_FOUND', 404);
+      }
 
       // Validate data schema
       const StudentSchema = z.object({
@@ -263,10 +243,10 @@ export class StudentService {
 
       const query = SQL`
         INSERT INTO students (
-          name, admission_number, email, class, parent_phone, dob, status
+          name, admission_number, email, class_id, parent_phone, dob, status
         ) VALUES (
           ${data.name}, ${data.admissionNumber}, ${data.email}, 
-          ${data.class}, ${data.parentPhone}, ${data.dob}, 'active'
+          ${classRow.id}, ${data.parentPhone}, ${data.dob}, 'active'
         )
         RETURNING id
       `;
@@ -275,7 +255,7 @@ export class StudentService {
       await client.query('COMMIT');
 
       logInfo(`Created student: ${student.id}`);
-      return await this.getStudentById(student.id);
+      return await this.getStudentByIdentifier({ id: student.id });
     } catch (error: unknown) {
       await client.query('ROLLBACK');
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
@@ -303,7 +283,7 @@ export class StudentService {
       await client.query('BEGIN');
 
       // Check if student exists
-      const existingStudent = await this.getStudentById(id);
+      const existingStudent = await this.getStudentByIdentifier({ id });
 
       // Validate update data
       const UpdateStudentSchema = z.object({
@@ -348,8 +328,17 @@ export class StudentService {
         setValues.push(SQL`${data.email}`);
       }
       if (data.class !== undefined) {
-        queryParts.push('class = ');
-        setValues.push(SQL`${data.class}`);
+        // Get class_id from class name
+        const { rows: [classRow] } = await client.query(SQL`
+          SELECT id FROM classes WHERE name = ${data.class}
+        `);
+
+        if (!classRow) {
+          throw new ServiceError(`Class "${data.class}" not found`, 'CLASS_NOT_FOUND', 404);
+        }
+
+        queryParts.push('class_id = ');
+        setValues.push(SQL`${classRow.id}`);
       }
       if (data.parentPhone !== undefined) {
         queryParts.push('parent_phone = ');
@@ -365,7 +354,7 @@ export class StudentService {
       }
 
       if (setValues.length === 0) {
-        return this.getStudentById(id);
+        return this.getStudentByIdentifier({ id });
       }
 
       const setClause = queryParts.map((part, i) => part + setValues[i]).join(', ');
@@ -380,7 +369,7 @@ export class StudentService {
       await client.query('COMMIT');
 
       logInfo(`Updated student: ${id}`);
-      return await this.getStudentById(student.id);
+      return await this.getStudentByIdentifier({ id });
     } catch (error: unknown) {
       await client.query('ROLLBACK');
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';

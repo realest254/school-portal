@@ -5,14 +5,19 @@ CREATE TABLE IF NOT EXISTS teachers (
     phone VARCHAR(50),
     employee_id VARCHAR(50) NOT NULL UNIQUE,
     subjects UUID[] DEFAULT '{}',
+    class_id UUID REFERENCES classes(id),
     join_date DATE NOT NULL,
     status VARCHAR(20) DEFAULT 'active',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- Create index on the subjects array for better performance
+-- Create indexes
 CREATE INDEX idx_teachers_subjects ON teachers USING gin (subjects);
+CREATE INDEX idx_teachers_class_id ON teachers(class_id);
+CREATE INDEX idx_teachers_email ON teachers(email);
+CREATE INDEX idx_teachers_employee_id ON teachers(employee_id);
+CREATE INDEX idx_teachers_status ON teachers(status);
 
 -- Add foreign key constraint to ensure subject IDs are valid
 ALTER TABLE teachers 

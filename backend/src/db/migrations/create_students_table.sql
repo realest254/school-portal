@@ -4,7 +4,7 @@ create table if not exists public.students (
     name text not null,
     admission_number text unique not null,
     email text unique not null,
-    class text not null,
+    class_id uuid not null references public.classes(id),
     parent_phone text not null,
     dob date not null,
     status text default 'active' check (status in ('active', 'inactive')),
@@ -15,7 +15,7 @@ create table if not exists public.students (
 -- Create indexes
 create index if not exists students_admission_number_idx on public.students(admission_number);
 create index if not exists students_email_idx on public.students(email);
-create index if not exists students_class_idx on public.students(class);
+create index if not exists students_class_id_idx on public.students(class_id);
 create index if not exists students_status_idx on public.students(status);
 
 -- Enable Row Level Security (RLS)

@@ -51,11 +51,7 @@ export class ServiceError extends Error {
 // Common response types
 export interface ServiceResult<T> {
   success: boolean;
-  data?: T;
-  error?: {
-    message: string;
-    code: string;
-  };
+  data: T;
 }
 
 // Pagination types
@@ -65,9 +61,8 @@ export interface PaginationParams {
 }
 
 export interface PaginatedResult<T> {
-  items: T[];
+  data: T;
   total: number;
   page: number;
   limit: number;
-  totalPages: number;
 }

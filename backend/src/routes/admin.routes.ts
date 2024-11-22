@@ -58,14 +58,15 @@ router.get(
 
 // Student Routes
 router.get('/students', StudentController.getAllStudents);
-router.get('/students/:id', StudentController.getStudentById);
+router.get('/students/class/:className', StudentController.getStudentsByClass);
+router.get('/students/:identifier', StudentController.getStudentByIdentifier);
 router.post('/students', studentValidation.create, StudentController.createStudent);
 router.put('/students/:id', studentValidation.update, StudentController.updateStudent);
 router.delete('/students/:id', StudentController.deleteStudent);
 
 // Teacher Routes
 router.get('/teachers', teacherController.getTeachers.bind(teacherController));
-router.get('/teachers/:id', teacherController.getTeacherByIdentifier.bind(teacherController));
+router.get('/teachers/:identifier', teacherController.getTeacherByIdentifier.bind(teacherController));
 router.post('/teachers', teacherValidation.create, teacherController.createTeacher.bind(teacherController));
 router.put('/teachers/:id', teacherValidation.update, teacherController.updateTeacher.bind(teacherController));
 router.delete('/teachers/:id', teacherController.deleteTeacher.bind(teacherController));
@@ -92,11 +93,6 @@ router.get(
   '/indiscipline',
   indisciplineValidation.validateFilters,
   indisciplineController.getAll
-);
-
-router.get(
-  '/indiscipline/:id',
-  indisciplineController.getById
 );
 
 router.get(

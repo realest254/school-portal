@@ -1,6 +1,6 @@
 import pool from '../config/database';
 import { logError, logInfo } from '../utils/logger';
-import SQL from 'sql-template-strings';
+import SQL, { SQLStatement } from 'sql-template-strings';
 import { z } from 'zod';
 import { 
   ServiceError, 
@@ -38,7 +38,9 @@ const TeacherSchema = z.object({
   joinDate: z.string().datetime(),
   status: z.enum(['active', 'inactive']).default('active'),
   createdAt: z.date(),
-  updatedAt: z.date()
+  updatedAt: z.date(),
+  classId: z.string().uuid().optional(),
+  className: z.string().optional()
 });
 
 export type Teacher = z.infer<typeof TeacherSchema>;
@@ -46,6 +48,7 @@ export type Teacher = z.infer<typeof TeacherSchema>;
 interface TeacherFilters {
   status?: 'active' | 'inactive';
   search?: string;  // Will match against name, email, or employeeId
+  class?: string;
   page?: number;
   limit?: number;
 }
@@ -54,19 +57,21 @@ interface CreateTeacherData {
   name: string;
   employeeId: string;
   email: string;
-  subjectIds: string[];
+  subjects: string[];
   phone: string;
   joinDate: string;
+  class?: string;
 }
 
 interface UpdateTeacherData {
   name?: string;
   employeeId?: string;
   email?: string;
-  subjectIds?: string[];
+  subjects?: string[];
   phone?: string;
   joinDate?: string;
   status?: 'active' | 'inactive';
+  class?: string;
 }
 
 interface GetTeacherIdentifier {
@@ -99,27 +104,15 @@ export class TeacherService {
     }
   }
 
-  async getTeachers(filters: TeacherFilters = {}): Promise<PaginatedResult<Teacher>> {
+  async getTeachers(filters: TeacherFilters = {}): Promise<PaginatedResult<Teacher[]>> {
     try {
       this.validateFilters(filters);
 
       const query = SQL`
-        SELECT 
-          t.id,
-          t.name,
-          t.email,
-          t.employee_id as "employeeId",
-          t.phone,
-          t.status,
-          t.join_date as "joinDate",
-          t.created_at as "createdAt",
-          t.updated_at as "updatedAt",
-          json_agg(DISTINCT jsonb_build_object(
-            'id', s.id,
-            'name', s.name,
-            'description', s.description
-          )) as subject_details
+        SELECT t.*, c.name as class_name, 
+               ARRAY_AGG(s.name) as subject_names
         FROM teachers t
+        LEFT JOIN classes c ON t.class_id = c.id
         LEFT JOIN subjects s ON s.id = ANY(t.subjects)
         WHERE 1=1
       `;
@@ -129,35 +122,41 @@ export class TeacherService {
       }
 
       if (filters.search) {
-        const searchPattern = `%${filters.search}%`;
         query.append(SQL` AND (
-          t.name ILIKE ${searchPattern} OR 
-          t.email ILIKE ${searchPattern} OR 
-          t.employee_id ILIKE ${searchPattern}
+          t.name ILIKE ${`%${filters.search}%`} OR
+          t.email ILIKE ${`%${filters.search}%`} OR
+          t.employee_id ILIKE ${`%${filters.search}%`} OR
+          c.name ILIKE ${`%${filters.search}%`}
         )`);
       }
+
+      if (filters.class) {
+        query.append(SQL` AND c.name = ${filters.class}`);
+      }
+
+      query.append(SQL` GROUP BY t.id, c.name`);
 
       // Add pagination
       const page = filters.page || 1;
       const limit = filters.limit || 10;
       const offset = (page - 1) * limit;
 
-      // Get total count
       const countQuery = SQL`SELECT COUNT(*) FROM (${query}) as count_query`;
       const { rows: [{ count }] } = await pool.query(countQuery);
-      const total = parseInt(count as string);
 
-      // Add pagination to main query
-      query.append(SQL` GROUP BY t.id LIMIT ${limit} OFFSET ${offset}`);
+      query.append(SQL` LIMIT ${limit} OFFSET ${offset}`);
+      const { rows } = await pool.query(query);
 
-      const { rows: teachers } = await pool.query(query);
-      
+      const teachers = rows.map(row => ({
+        ...row,
+        class: row.class_name // Map the joined class_name back to class for backward compatibility
+      }));
+
       return {
-        items: teachers,
-        total,
+        data: teachers,
+        total: parseInt(count),
         page,
-        limit,
-        totalPages: Math.ceil(total / limit)
+        limit
       };
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
@@ -173,24 +172,30 @@ export class TeacherService {
       }
 
       const query = SQL`
-        SELECT * FROM teachers 
+        SELECT t.*, c.name as class_name, 
+               ARRAY_AGG(s.name) as subject_names
+        FROM teachers t
+        LEFT JOIN classes c ON t.class_id = c.id
+        LEFT JOIN subjects s ON s.id = ANY(t.subjects)
         WHERE 1=1
       `;
 
       if (identifier.id) {
         const uuid = createUUID(identifier.id);
-        query.append(SQL` AND id = ${uuid}`);
+        query.append(SQL` AND t.id = ${uuid}`);
       }
       if (identifier.employeeId) {
-        query.append(SQL` AND employee_id = ${identifier.employeeId}`);
+        query.append(SQL` AND t.employee_id = ${identifier.employeeId}`);
       }
       if (identifier.email) {
         const email = createEmail(identifier.email);
-        query.append(SQL` AND email = ${email}`);
+        query.append(SQL` AND t.email = ${email}`);
       }
       if (identifier.name) {
-        query.append(SQL` AND name = ${identifier.name}`);
+        query.append(SQL` AND t.name = ${identifier.name}`);
       }
+
+      query.append(SQL` GROUP BY t.id, c.name`);
 
       const { rows } = await pool.query(query);
       if (rows.length === 0) {
@@ -207,17 +212,58 @@ export class TeacherService {
     }
   }
 
+  /**
+   * Convert subject names to IDs
+   */
+  private async getSubjectIds(subjectNames: string[]): Promise<string[]> {
+    try {
+      const query = SQL`
+        SELECT id, name 
+        FROM subjects 
+        WHERE name = ANY(${subjectNames})
+      `;
+
+      const { rows } = await pool.query(query);
+      
+      if (rows.length !== subjectNames.length) {
+        const foundNames = rows.map(row => row.name);
+        const notFound = subjectNames.filter(name => !foundNames.includes(name));
+        throw new ServiceError(`Some subjects not found: ${notFound.join(', ')}`, 'SUBJECTS_NOT_FOUND');
+      }
+
+      return rows.map(row => row.id);
+    } catch (error) {
+      if (error instanceof ServiceError) throw error;
+      throw new ServiceError('Failed to fetch subject IDs', 'FETCH_ERROR');
+    }
+  }
+
   async createTeacher(data: CreateTeacherData): Promise<ServiceResult<Teacher>> {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+
+      // Convert subject names to IDs
+      const subjectIds = await this.getSubjectIds(data.subjects);
+
+      // Get class ID from name
+      let classId = null;
+      if (data.class) {
+        const { rows: [classRow] } = await client.query(SQL`
+          SELECT id FROM classes WHERE name = ${data.class}
+        `);
+        
+        if (!classRow) {
+          throw new ServiceError(`Class not found: ${data.class}`, 'CLASS_NOT_FOUND');
+        }
+        classId = classRow.id;
+      }
 
       // Validate data
       const validatedData = {
         ...data,
         email: createEmail(data.email),
         phone: createPhoneNumber(data.phone),
-        subjectIds: data.subjectIds.map(id => createUUID(id))
       };
 
       // Check if email or employeeId already exists
@@ -234,29 +280,48 @@ export class TeacherService {
 
       const query = SQL`
         INSERT INTO teachers (
-          name, employee_id, email, phone, subjects, join_date, status
+          name,
+          email,
+          phone,
+          employee_id,
+          subjects,
+          class_id,
+          join_date,
+          status
         ) VALUES (
           ${validatedData.name},
-          ${validatedData.employeeId},
           ${validatedData.email},
           ${validatedData.phone},
-          ${validatedData.subjectIds},
+          ${validatedData.employeeId},
+          ${subjectIds},
+          ${classId},
           ${validatedData.joinDate},
           'active'
         )
-        RETURNING id
+        RETURNING *
       `;
 
-      const { rows: [{ id }] } = await client.query(query);
+      const { rows: [teacher] } = await client.query(query);
       await client.query('COMMIT');
 
-      logInfo(`Created teacher: ${id}`);
-      return this.getTeacherByIdentifier({ id });
+      return await this.getTeacherByIdentifier({ id: teacher.id });
     } catch (error: unknown) {
       await client.query('ROLLBACK');
+      if (error instanceof ServiceError) throw error;
+      
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
       logError('Error creating teacher:', errorMessage);
-      throw error;
+      
+      if (errorMessage.includes('unique constraint')) {
+        if (errorMessage.includes('email')) {
+          throw new DuplicateTeacherError('email');
+        }
+        if (errorMessage.includes('employee_id')) {
+          throw new DuplicateTeacherError('employee ID');
+        }
+      }
+      
+      throw new ServiceError('Failed to create teacher', 'CREATE_ERROR');
     } finally {
       client.release();
     }
@@ -267,64 +332,89 @@ export class TeacherService {
     try {
       await client.query('BEGIN');
 
-      const uuid = createUUID(id);
-      const setValues: ReturnType<typeof SQL>[] = [];
-      const queryParts: string[] = [];
+      // Check if teacher exists
+      await this.getTeacherByIdentifier({ id });
 
-      if (data.name !== undefined) {
-        queryParts.push('name = ');
-        setValues.push(SQL`${data.name}`);
-      }
-      if (data.employeeId !== undefined) {
-        queryParts.push('employee_id = ');
-        setValues.push(SQL`${data.employeeId}`);
-      }
-      if (data.email !== undefined) {
-        queryParts.push('email = ');
-        setValues.push(SQL`${createEmail(data.email)}`);
-      }
-      if (data.phone !== undefined) {
-        queryParts.push('phone = ');
-        setValues.push(SQL`${createPhoneNumber(data.phone)}`);
-      }
-      if (data.subjectIds !== undefined) {
-        queryParts.push('subjects = ');
-        setValues.push(SQL`${data.subjectIds.map(id => createUUID(id))}`);
-      }
-      if (data.joinDate !== undefined) {
-        queryParts.push('join_date = ');
-        setValues.push(SQL`${data.joinDate}`);
-      }
-      if (data.status !== undefined) {
-        queryParts.push('status = ');
-        setValues.push(SQL`${data.status}`);
+      const updateParts: string[] = [];
+      const updateValues: SQLStatement[] = [];
+
+      if (data.name) {
+        updateParts.push('name = ');
+        updateValues.push(SQL`${data.name}`);
       }
 
-      if (setValues.length === 0) {
+      if (data.email) {
+        updateParts.push('email = ');
+        updateValues.push(SQL`${data.email}`);
+      }
+
+      if (data.phone) {
+        updateParts.push('phone = ');
+        updateValues.push(SQL`${data.phone}`);
+      }
+
+      if (data.employeeId) {
+        updateParts.push('employee_id = ');
+        updateValues.push(SQL`${data.employeeId}`);
+      }
+
+      if (data.subjects) {
+        const subjectIds = await this.getSubjectIds(data.subjects);
+        updateParts.push('subjects = ');
+        updateValues.push(SQL`${subjectIds}`);
+      }
+
+      if (data.class) {
+        const { rows: [classRow] } = await client.query(SQL`
+          SELECT id FROM classes WHERE name = ${data.class}
+        `);
+        
+        if (!classRow) {
+          throw new ServiceError(`Class not found: ${data.class}`, 'CLASS_NOT_FOUND');
+        }
+
+        updateParts.push('class_id = ');
+        updateValues.push(SQL`${classRow.id}`);
+      }
+
+      if (data.status) {
+        updateParts.push('status = ');
+        updateValues.push(SQL`${data.status}`);
+      }
+
+      if (updateParts.length === 0) {
         return this.getTeacherByIdentifier({ id });
       }
 
-      const setClause = queryParts.map((part, i) => part + setValues[i]).join(', ');
+      const setClause = updateParts.map((part, i) => part + updateValues[i].text).join(', ');
       const query = SQL`
         UPDATE teachers 
-        SET ${setClause} 
-        WHERE id = ${uuid}
-        RETURNING id
+        SET ${setClause}
+        WHERE id = ${id}
+        RETURNING *
       `;
 
-      const { rows } = await client.query(query);
-      if (rows.length === 0) {
-        throw new TeacherNotFoundError(id);
-      }
-
+      const { rows: [teacher] } = await client.query(query);
       await client.query('COMMIT');
-      logInfo(`Updated teacher: ${id}`);
-      return this.getTeacherByIdentifier({ id });
+
+      return await this.getTeacherByIdentifier({ id: teacher.id });
     } catch (error: unknown) {
       await client.query('ROLLBACK');
+      if (error instanceof ServiceError) throw error;
+      
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
       logError('Error updating teacher:', errorMessage);
-      throw error;
+      
+      if (errorMessage.includes('unique constraint')) {
+        if (errorMessage.includes('email')) {
+          throw new DuplicateTeacherError('email');
+        }
+        if (errorMessage.includes('employee_id')) {
+          throw new DuplicateTeacherError('employee ID');
+        }
+      }
+      
+      throw new ServiceError('Failed to update teacher', 'UPDATE_ERROR');
     } finally {
       client.release();
     }
