@@ -1,42 +1,75 @@
 import { Request, Response } from 'express';
-import { TeacherService } from '../services/teacher.service';
+import { teacherService, TeacherNotFoundError, DuplicateTeacherError } from '../services/teacher.service';
 import { logError } from '../utils/logger';
+import { UserRole } from '../middlewares/auth.middleware';
+
+// Use the built-in Express Request type augmentation
+type AuthenticatedRequest = Request & {
+  user?: {
+    id: string;
+    role: UserRole;
+    email: string;
+  };
+};
 
 export class TeacherController {
-  static async getTeachers(req: Request, res: Response) {
+  private static instance: TeacherController;
+  private constructor() {}
+
+  static getInstance(): TeacherController {
+    if (!TeacherController.instance) {
+      TeacherController.instance = new TeacherController();
+    }
+    return TeacherController.instance;
+  }
+
+  async getTeachers(req: Request, res: Response) {
     try {
       const filters = {
-        status: req.query.status as string,
-        subjectId: req.query.subjectId as string,
-        search: req.query.search as string,
+        status: req.query.status as 'active' | 'inactive' | undefined,
+        search: req.query.search as string | undefined,
         page: req.query.page ? parseInt(req.query.page as string) : undefined,
         limit: req.query.limit ? parseInt(req.query.limit as string) : undefined
       };
 
-      const result = await TeacherService.getTeachers(filters);
+      const result = await teacherService.getTeachers(filters);
       res.json(result);
-    } catch (error) {
-      logError(error, 'TeacherController.getTeachers');
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      logError('TeacherController.getTeachers:', errorMessage);
       res.status(500).json({ error: 'Failed to retrieve teachers' });
     }
   }
 
-  static async getTeacherById(req: Request, res: Response) {
+  async getTeacherByIdentifier(req: Request, res: Response) {
     try {
-      const teacher = await TeacherService.getTeacherById(req.params.id);
-      if (!teacher) {
-        return res.status(404).json({ error: 'Teacher not found' });
+      const identifier = {
+        id: req.params.id,
+        employeeId: req.query.employeeId as string,
+        email: req.query.email as string,
+        name: req.query.name as string
+      };
+
+      const result = await teacherService.getTeacherByIdentifier(identifier);
+      res.json(result.data);
+    } catch (error: unknown) {
+      if (error instanceof TeacherNotFoundError) {
+        return res.status(404).json({ error: error.message });
       }
-      res.json(teacher);
-    } catch (error) {
-      logError(error, 'TeacherController.getTeacherById');
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      logError('TeacherController.getTeacherByIdentifier:', errorMessage);
       res.status(500).json({ error: 'Failed to retrieve teacher' });
     }
   }
 
-  static async createTeacher(req: Request, res: Response) {
+  async createTeacher(req: AuthenticatedRequest, res: Response) {
     try {
-      const teacher = await TeacherService.createTeacher({
+      // Ensure user is admin
+      if (req.user?.role !== UserRole.ADMIN) {
+        return res.status(403).json({ error: 'Access denied. Admin privileges required.' });
+      }
+
+      const result = await teacherService.createTeacher({
         name: req.body.name,
         email: req.body.email,
         phone: req.body.phone,
@@ -44,21 +77,26 @@ export class TeacherController {
         employeeId: req.body.employeeId,
         joinDate: req.body.joinDate
       });
-      res.status(201).json(teacher);
-    } catch (error) {
-      logError(error, 'TeacherController.createTeacher');
-      if (error instanceof Error) {
-        if (error.message.includes('subject')) {
-          return res.status(400).json({ error: error.message });
-        }
+
+      res.status(201).json(result.data);
+    } catch (error: unknown) {
+      if (error instanceof DuplicateTeacherError) {
+        return res.status(409).json({ error: error.message });
       }
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      logError('TeacherController.createTeacher:', errorMessage);
       res.status(500).json({ error: 'Failed to create teacher' });
     }
   }
 
-  static async updateTeacher(req: Request, res: Response) {
+  async updateTeacher(req: AuthenticatedRequest, res: Response) {
     try {
-      const teacher = await TeacherService.updateTeacher(req.params.id, {
+      // Ensure user is admin
+      if (req.user?.role !== UserRole.ADMIN) {
+        return res.status(403).json({ error: 'Access denied. Admin privileges required.' });
+      }
+
+      const result = await teacherService.updateTeacher(req.params.id, {
         name: req.body.name,
         email: req.body.email,
         phone: req.body.phone,
@@ -68,32 +106,38 @@ export class TeacherController {
         status: req.body.status
       });
 
-      if (!teacher) {
-        return res.status(404).json({ error: 'Teacher not found' });
+      res.json(result.data);
+    } catch (error: unknown) {
+      if (error instanceof TeacherNotFoundError) {
+        return res.status(404).json({ error: error.message });
       }
-
-      res.json(teacher);
-    } catch (error) {
-      logError(error, 'TeacherController.updateTeacher');
-      if (error instanceof Error) {
-        if (error.message.includes('subject')) {
-          return res.status(400).json({ error: error.message });
-        }
+      if (error instanceof DuplicateTeacherError) {
+        return res.status(409).json({ error: error.message });
       }
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      logError('TeacherController.updateTeacher:', errorMessage);
       res.status(500).json({ error: 'Failed to update teacher' });
     }
   }
 
-  static async deleteTeacher(req: Request, res: Response) {
+  async deleteTeacher(req: AuthenticatedRequest, res: Response) {
     try {
-      const teacher = await TeacherService.deleteTeacher(req.params.id);
-      if (!teacher) {
-        return res.status(404).json({ error: 'Teacher not found' });
+      // Ensure user is admin
+      if (req.user?.role !== UserRole.ADMIN) {
+        return res.status(403).json({ error: 'Access denied. Admin privileges required.' });
       }
-      res.json({ message: 'Teacher deleted successfully' });
-    } catch (error) {
-      logError(error, 'TeacherController.deleteTeacher');
+
+      await teacherService.deleteTeacher(req.params.id);
+      res.status(204).send();
+    } catch (error: unknown) {
+      if (error instanceof TeacherNotFoundError) {
+        return res.status(404).json({ error: error.message });
+      }
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      logError('TeacherController.deleteTeacher:', errorMessage);
       res.status(500).json({ error: 'Failed to delete teacher' });
     }
   }
 }
+
+export const teacherController = TeacherController.getInstance();

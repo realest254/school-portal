@@ -77,16 +77,18 @@ const SignupPage = () => {
       }
 
       // Create account
-      await authService.acceptInvite(
+      const result = await authService.acceptInvite(
         invite.email,
         formData.password,
-        invite.id
+        invite.id,
+        invite.role
       );
 
-      // Redirect to login
+      // Redirect to login with success message
       navigate('/auth/login', { 
         state: { 
-          message: 'Account created successfully! Please sign in.' 
+          message: result.message,
+          email: result.email
         } 
       });
     } catch (error) {

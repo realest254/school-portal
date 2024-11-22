@@ -1,6 +1,16 @@
 import { Request, Response } from 'express';
 import { SubjectService } from '../services/subject.service';
-import { AuthenticatedRequest } from '../middlewares/adminAuth.middleware';
+import { UserRole } from '../middlewares/auth.middleware';
+import { logError } from '../utils/logger';
+
+// Use the built-in Express Request type augmentation
+type AuthenticatedRequest = Request & {
+  user?: {
+    id: string;
+    role: UserRole;
+    email: string;
+  };
+};
 
 export class SubjectController {
   private subjectService: SubjectService;
@@ -12,44 +22,50 @@ export class SubjectController {
   async createSubject(req: AuthenticatedRequest, res: Response) {
     try {
       // Ensure user is admin
-      if (req.user?.role !== 'admin') {
+      if (req.user?.role !== UserRole.ADMIN) {
         return res.status(403).json({ error: 'Access denied. Admin privileges required.' });
       }
 
       const subject = await this.subjectService.create(req.body);
       res.status(201).json(subject);
-    } catch (error: any) {
-      res.status(400).json({ error: error.message });
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      logError('Error creating subject:', errorMessage);
+      res.status(400).json({ error: errorMessage });
     }
   }
 
   async updateSubject(req: AuthenticatedRequest, res: Response) {
     try {
       // Ensure user is admin
-      if (req.user?.role !== 'admin') {
+      if (req.user?.role !== UserRole.ADMIN) {
         return res.status(403).json({ error: 'Access denied. Admin privileges required.' });
       }
 
       const { id } = req.params;
       const subject = await this.subjectService.update(id, req.body);
       res.json(subject);
-    } catch (error: any) {
-      res.status(400).json({ error: error.message });
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      logError('Error updating subject:', errorMessage);
+      res.status(400).json({ error: errorMessage });
     }
   }
 
   async deleteSubject(req: AuthenticatedRequest, res: Response) {
     try {
       // Ensure user is admin
-      if (req.user?.role !== 'admin') {
+      if (req.user?.role !== UserRole.ADMIN) {
         return res.status(403).json({ error: 'Access denied. Admin privileges required.' });
       }
 
       const { id } = req.params;
       await this.subjectService.delete(id);
       res.json({ message: 'Subject deleted successfully' });
-    } catch (error: any) {
-      res.status(400).json({ error: error.message });
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      logError('Error deleting subject:', errorMessage);
+      res.status(400).json({ error: errorMessage });
     }
   }
 
@@ -63,8 +79,10 @@ export class SubjectController {
       }
       
       res.json(subject);
-    } catch (error: any) {
-      res.status(400).json({ error: error.message });
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      logError('Error fetching subject:', errorMessage);
+      res.status(400).json({ error: errorMessage });
     }
   }
 
@@ -72,8 +90,10 @@ export class SubjectController {
     try {
       const subjects = await this.subjectService.getAll();
       res.json(subjects);
-    } catch (error: any) {
-      res.status(400).json({ error: error.message });
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      logError('Error fetching all subjects:', errorMessage);
+      res.status(400).json({ error: errorMessage });
     }
   }
 
@@ -87,8 +107,10 @@ export class SubjectController {
 
       const subjects = await this.subjectService.search(term);
       res.json(subjects);
-    } catch (error: any) {
-      res.status(400).json({ error: error.message });
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      logError('Error searching subjects:', errorMessage);
+      res.status(400).json({ error: errorMessage });
     }
   }
 }

@@ -2,19 +2,52 @@ import pool from '../config/database';
 import { logError, logInfo } from '../utils/logger';
 import SQL from 'sql-template-strings';
 import { z } from 'zod';
+import {
+  UUID,
+  Email,
+  PhoneNumber,
+  ServiceError,
+  ServiceResult,
+  PaginationParams,
+  PaginatedResult,
+  createUUID,
+  createEmail,
+  createPhoneNumber,
+} from '../types/common.types';
+
+// Student-specific error types
+export class StudentNotFoundError extends ServiceError {
+  constructor(identifier: string) {
+    super(`Student not found: ${identifier}`, 'STUDENT_NOT_FOUND', 404);
+  }
+}
+
+export class DuplicateStudentError extends ServiceError {
+  constructor(field: string) {
+    super(`Student with this ${field} already exists`, 'DUPLICATE_STUDENT', 409);
+  }
+}
 
 // Validation schemas
-const UUIDSchema = z.string().uuid();
-const EmailSchema = z.string().email();
-const StatusSchema = z.enum(['active', 'inactive']);
-const ClassSchema = z.string();
+const StudentSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string().min(2).max(100),
+  admissionNumber: z.string().min(3).max(20),
+  email: z.string().email(),
+  class: z.string(),
+  parentPhone: z.string().regex(/^\+?[\d\s-()]{10,}$/),
+  dob: z.string().datetime(),
+  status: z.enum(['active', 'inactive']).default('active'),
+  createdAt: z.date(),
+  updatedAt: z.date()
+});
 
-interface StudentFilters {
-  status?: string;
+export type Student = z.infer<typeof StudentSchema>;
+
+interface StudentFilters extends PaginationParams {
+  status?: 'active' | 'inactive';
   class?: string;
-  search?: string;  // Will match against name, email, or admissionNumber
-  page?: number;
-  limit?: number;
+  search?: string;
 }
 
 interface CreateStudentData {
@@ -36,153 +69,197 @@ interface UpdateStudentData {
   status?: 'active' | 'inactive';
 }
 
-interface GetStudentIdentifier {
-  id?: string;
-  admissionNumber?: string;
-  email?: string;
-  name?: string;
-}
-
 export class StudentService {
-  private static validateFilters(filters: StudentFilters) {
+  private static instance: StudentService;
+  private constructor() {}
+
+  static getInstance(): StudentService {
+    if (!StudentService.instance) {
+      StudentService.instance = new StudentService();
+    }
+    return StudentService.instance;
+  }
+
+  private static validateFilters(filters: StudentFilters): void {
     if (filters.status) {
-      StatusSchema.parse(filters.status);
+      z.enum(['active', 'inactive']).parse(filters.status);
     }
     if (filters.class) {
-      ClassSchema.parse(filters.class);
+      z.string().min(1).max(20).parse(filters.class);
     }
-    if (filters.page) {
-      z.number().positive().parse(filters.page);
-    }
-    if (filters.limit) {
-      z.number().positive().max(100).parse(filters.limit);
+    if (filters.search) {
+      z.string().max(100).parse(filters.search);
     }
   }
 
-  static async getStudents(filters: StudentFilters = {}) {
+  async getStudents(filters: StudentFilters): Promise<PaginatedResult<Student>> {
     try {
-      // Validate filters
-      this.validateFilters(filters);
-
-      const query = SQL`
-        SELECT 
-          s.id,
-          s.name,
-          s.email,
-          s.admission_number as "admissionNumber",
-          s.class,
-          s.parent_phone as "parentPhone",
-          s.dob,
-          s.status,
-          s.created_at as "createdAt",
-          s.updated_at as "updatedAt"
-        FROM students s
-        WHERE 1=1
-      `;
-
-      if (filters.status) {
-        query.append(SQL` AND s.status = ${filters.status}`);
-      }
-
-      if (filters.class) {
-        query.append(SQL` AND s.class = ${filters.class}`);
-      }
-
-      if (filters.search) {
-        const searchPattern = `%${filters.search}%`;
-        query.append(SQL` AND (
-          s.name ILIKE ${searchPattern} OR 
-          s.email ILIKE ${searchPattern} OR 
-          s.admission_number ILIKE ${searchPattern}
-        )`);
-      }
-
-      // Get total count
-      const countQuery = SQL`SELECT COUNT(*) FROM (${query}) AS count`;
-      const { rows: [{ count }] } = await pool.query(countQuery);
-
-      // Add pagination
+      StudentService.validateFilters(filters);
+      
       const page = filters.page || 1;
       const limit = filters.limit || 10;
       const offset = (page - 1) * limit;
 
-      query.append(SQL` ORDER BY s.created_at DESC LIMIT ${limit} OFFSET ${offset}`);
+      let query = SQL`SELECT * FROM students WHERE 1=1`;
+      
+      if (filters.status) {
+        query.append(SQL` AND status = ${filters.status}`);
+      }
+      
+      if (filters.class) {
+        query.append(SQL` AND class = ${filters.class}`);
+      }
+      
+      if (filters.search) {
+        const searchTerm = `%${filters.search}%`;
+        query.append(SQL` AND (
+          name ILIKE ${searchTerm} OR 
+          email ILIKE ${searchTerm} OR 
+          admission_number ILIKE ${searchTerm}
+        )`);
+      }
 
-      const { rows: students } = await pool.query(query);
+      const countQuery = SQL`SELECT COUNT(*) FROM (${query}) as count`;
+      const { rows: [{ count }] } = await pool.query(countQuery);
+      
+      query.append(SQL` ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}`);
+      const { rows } = await pool.query(query);
+
+      const students = rows.map(row => StudentSchema.parse(row));
+      const total = parseInt(count);
 
       return {
-        students,
-        pagination: {
-          total: parseInt(count),
-          page,
-          limit
-        }
+        items: students,
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit)
       };
-    } catch (error) {
-      logError('Error in getStudents:', error instanceof Error ? error.message : String(error));
-      throw error;
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      logError('Error fetching students:', errorMessage);
+      if (error instanceof z.ZodError) {
+        throw new ServiceError('Invalid filter parameters', 'INVALID_FILTERS', 400);
+      }
+      throw new ServiceError(
+        'Failed to fetch students',
+        'FETCH_STUDENTS_FAILED',
+        500
+      );
     }
   }
 
-  static async getStudentByIdentifier(identifier: GetStudentIdentifier) {
+  async getStudentById(id: string): Promise<ServiceResult<Student>> {
+    try {
+      const uuid = createUUID(id);
+      const query = SQL`
+        SELECT * FROM students 
+        WHERE id = ${uuid}
+      `;
+      
+      const { rows } = await pool.query(query);
+      if (rows.length === 0) {
+        throw new StudentNotFoundError(id);
+      }
+
+      const student = StudentSchema.parse(rows[0]);
+      return { success: true, data: student };
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      logError('Error fetching student:', errorMessage);
+      if (error instanceof StudentNotFoundError) {
+        throw error;
+      }
+      if (error instanceof z.ZodError) {
+        throw new ServiceError('Invalid student data in database', 'INVALID_STUDENT_DATA', 500);
+      }
+      throw new ServiceError(
+        'Failed to fetch student',
+        'FETCH_STUDENT_FAILED',
+        500
+      );
+    }
+  }
+
+  async getStudentByIdentifier(identifier: { id?: string; admissionNumber?: string; email?: string; name?: string }): Promise<ServiceResult<Student>> {
     try {
       if (!identifier.id && !identifier.admissionNumber && !identifier.email && !identifier.name) {
         throw new Error('At least one identifier (id, admissionNumber, email, or name) must be provided');
       }
 
       const query = SQL`
-        SELECT 
-          s.id,
-          s.name,
-          s.email,
-          s.admission_number as "admissionNumber",
-          s.class,
-          s.parent_phone as "parentPhone",
-          s.dob,
-          s.status,
-          s.created_at as "createdAt",
-          s.updated_at as "updatedAt"
-        FROM students s
+        SELECT * FROM students 
         WHERE 1=1
       `;
 
       if (identifier.id) {
-        UUIDSchema.parse(identifier.id);
-        query.append(SQL` AND s.id = ${identifier.id}`);
+        const uuid = createUUID(identifier.id);
+        query.append(SQL` AND id = ${uuid}`);
       }
       if (identifier.admissionNumber) {
-        query.append(SQL` AND s.admission_number = ${identifier.admissionNumber}`);
+        query.append(SQL` AND admission_number = ${identifier.admissionNumber}`);
       }
       if (identifier.email) {
-        query.append(SQL` AND s.email = ${identifier.email}`);
+        const email = createEmail(identifier.email);
+        query.append(SQL` AND email = ${email}`);
       }
       if (identifier.name) {
-        query.append(SQL` AND s.name = ${identifier.name}`);
+        query.append(SQL` AND name = ${identifier.name}`);
       }
 
-      const { rows: [student] } = await pool.query(query);
-      return student;
-    } catch (error) {
-      logError('Error in getStudentByIdentifier:', error instanceof Error ? error.message : String(error));
-      throw error;
+      const { rows } = await pool.query(query);
+      if (rows.length === 0) {
+        const identifierValue = identifier.id || identifier.admissionNumber || identifier.email || identifier.name || 'unknown';
+        throw new StudentNotFoundError(identifierValue);
+      }
+
+      const student = StudentSchema.parse(rows[0]);
+      return { success: true, data: student };
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      logError('Error fetching student:', errorMessage);
+      if (error instanceof StudentNotFoundError) {
+        throw error;
+      }
+      if (error instanceof z.ZodError) {
+        throw new ServiceError('Invalid student data in database', 'INVALID_STUDENT_DATA', 500);
+      }
+      throw new ServiceError(
+        'Failed to fetch student',
+        'FETCH_STUDENT_FAILED',
+        500
+      );
     }
   }
 
-  static async createStudent(data: CreateStudentData) {
+  async createStudent(data: CreateStudentData): Promise<ServiceResult<Student>> {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
 
+      // Validate data schema
       const StudentSchema = z.object({
-        name: z.string(),
-        admissionNumber: z.string(),
-        email: EmailSchema,
+        name: z.string().min(2).max(100),
+        admissionNumber: z.string().min(3).max(20),
+        email: z.string().email(),
         class: z.string(),
-        parentPhone: z.string(),
+        parentPhone: z.string().regex(/^\+?[\d\s-()]{10,}$/),
         dob: z.string().datetime()
       });
 
       StudentSchema.parse(data);
+
+      // Check for duplicate email or admission number
+      const existingStudent = await this.getStudentByIdentifier({
+        email: data.email,
+        admissionNumber: data.admissionNumber
+      }).catch(() => null);
+
+      if (existingStudent?.data) {
+        throw new DuplicateStudentError(
+          existingStudent.data.email === data.email ? 'email' : 'admission number'
+        );
+      }
 
       const query = SQL`
         INSERT INTO students (
@@ -198,34 +275,62 @@ export class StudentService {
       await client.query('COMMIT');
 
       logInfo(`Created student: ${student.id}`);
-      return await this.getStudentByIdentifier({ id: student.id });
-    } catch (error) {
+      return await this.getStudentById(student.id);
+    } catch (error: unknown) {
       await client.query('ROLLBACK');
-      logError('Error in createStudent:', error instanceof Error ? error.message : String(error));
-      throw error;
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      logError('Error creating student:', errorMessage);
+      
+      if (error instanceof DuplicateStudentError) {
+        throw error;
+      }
+      if (error instanceof z.ZodError) {
+        throw new ServiceError('Invalid student data', 'INVALID_STUDENT_DATA', 400);
+      }
+      throw new ServiceError(
+        'Failed to create student',
+        'CREATE_STUDENT_FAILED',
+        500
+      );
     } finally {
       client.release();
     }
   }
 
-  static async updateStudent(id: string, data: UpdateStudentData) {
-    UUIDSchema.parse(id);
-
+  async updateStudent(id: string, data: UpdateStudentData): Promise<ServiceResult<Student>> {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
 
+      // Check if student exists
+      const existingStudent = await this.getStudentById(id);
+
+      // Validate update data
       const UpdateStudentSchema = z.object({
-        name: z.string().optional(),
-        admissionNumber: z.string().optional(),
-        email: EmailSchema.optional(),
+        name: z.string().min(2).max(100).optional(),
+        admissionNumber: z.string().min(3).max(20).optional(),
+        email: z.string().email().optional(),
         class: z.string().optional(),
-        parentPhone: z.string().optional(),
+        parentPhone: z.string().regex(/^\+?[\d\s-()]{10,}$/).optional(),
         dob: z.string().datetime().optional(),
-        status: StatusSchema.optional()
+        status: z.enum(['active', 'inactive']).optional()
       });
 
       UpdateStudentSchema.parse(data);
+
+      // Check for duplicates if email or admission number is being updated
+      if (data.email || data.admissionNumber) {
+        const duplicateCheck = await this.getStudentByIdentifier({
+          email: data.email,
+          admissionNumber: data.admissionNumber
+        }).catch(() => null);
+
+        if (duplicateCheck?.data && duplicateCheck.data.id !== id) {
+          throw new DuplicateStudentError(
+            duplicateCheck.data.email === data.email ? 'email' : 'admission number'
+          );
+        }
+      }
 
       const setValues: ReturnType<typeof SQL>[] = [];
       const queryParts: string[] = [];
@@ -260,7 +365,7 @@ export class StudentService {
       }
 
       if (setValues.length === 0) {
-        return null;
+        return this.getStudentById(id);
       }
 
       const setClause = queryParts.map((part, i) => part + setValues[i]).join(', ');
@@ -275,23 +380,35 @@ export class StudentService {
       await client.query('COMMIT');
 
       logInfo(`Updated student: ${id}`);
-      return await this.getStudentByIdentifier({ id: student.id });
-    } catch (error) {
+      return await this.getStudentById(student.id);
+    } catch (error: unknown) {
       await client.query('ROLLBACK');
-      logError('Error in updateStudent:', error instanceof Error ? error.message : String(error));
-      throw error;
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      logError('Error updating student:', errorMessage);
+
+      if (error instanceof StudentNotFoundError || error instanceof DuplicateStudentError) {
+        throw error;
+      }
+      if (error instanceof z.ZodError) {
+        throw new ServiceError('Invalid student data', 'INVALID_STUDENT_DATA', 400);
+      }
+      throw new ServiceError(
+        'Failed to update student',
+        'UPDATE_STUDENT_FAILED',
+        500
+      );
     } finally {
       client.release();
     }
   }
 
-  static async deleteStudent(id: string) {
+  async deleteStudent(id: string): Promise<ServiceResult<null>> {
     try {
-      UUIDSchema.parse(id);
+      const uuid = createUUID(id);
 
       const query = SQL`
         DELETE FROM students 
-        WHERE id = ${id} 
+        WHERE id = ${uuid} 
         RETURNING id
       `;
       
@@ -300,10 +417,17 @@ export class StudentService {
       if (student) {
         logInfo(`Deleted student: ${id}`);
       }
-      return student;
-    } catch (error) {
-      logError('Error in deleteStudent:', error instanceof Error ? error.message : String(error));
-      throw error;
+      return { success: true, data: null };
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      logError('Error deleting student:', errorMessage);
+      throw new ServiceError(
+        'Failed to delete student',
+        'DELETE_STUDENT_FAILED',
+        500
+      );
     }
   }
 }
+
+export const studentService = StudentService.getInstance();

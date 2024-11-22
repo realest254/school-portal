@@ -1,8 +1,18 @@
 import { Request, Response } from 'express';
 import { validationResult } from 'express-validator';
-import { StudentService } from '../services/student.service';
+import { studentService } from '../services/student.service';
 import { logError } from '../utils/logger';
-import { AuthenticatedRequest } from '../middlewares/adminAuth.middleware';
+import { UserRole } from '../middlewares/auth.middleware';
+import { ServiceError } from '../types/common.types';
+
+// Use the built-in Express Request type augmentation
+type AuthenticatedRequest = Request & {
+  user?: {
+    id: string;
+    role: UserRole;
+    email: string;
+  };
+};
 
 interface CreateStudentData {
   name: string;
@@ -20,7 +30,7 @@ export class StudentController {
   static async getAllStudents(req: AuthenticatedRequest, res: Response) {
     try {
       // Ensure user is admin
-      if (req.user?.role !== 'admin') {
+      if (req.user?.role !== UserRole.ADMIN) {
         return res.status(403).json({ error: 'Access denied. Admin privileges required.' });
       }
 
@@ -31,8 +41,8 @@ export class StudentController {
 
       const { status, class: classFilter, search, page, limit } = req.query;
       
-      const result = await StudentService.getStudents({
-        status: status as string,
+      const result = await studentService.getStudents({
+        status: status === 'active' || status === 'inactive' ? status : undefined,
         class: classFilter as string,
         search: search as string,
         page: page ? Number(page) : undefined,
@@ -40,8 +50,9 @@ export class StudentController {
       });
 
       return res.status(200).json(result);
-    } catch (error) {
-      logError(error, 'StudentController.getAllStudents');
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      logError('Error fetching students:', errorMessage);
       return res.status(500).json({ error: 'Failed to fetch students' });
     }
   }
@@ -52,20 +63,21 @@ export class StudentController {
   static async getStudentById(req: AuthenticatedRequest, res: Response) {
     try {
       // Ensure user is admin
-      if (req.user?.role !== 'admin') {
+      if (req.user?.role !== UserRole.ADMIN) {
         return res.status(403).json({ error: 'Access denied. Admin privileges required.' });
       }
 
       const { id } = req.params;
-      const student = await StudentService.getStudentById(id);
+      const student = await studentService.getStudentById(id);
 
       if (!student) {
         return res.status(404).json({ error: 'Student not found' });
       }
 
       return res.status(200).json(student);
-    } catch (error) {
-      logError(error, 'StudentController.getStudentById');
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      logError('Error fetching student:', errorMessage);
       return res.status(500).json({ error: 'Failed to fetch student' });
     }
   }
@@ -76,7 +88,7 @@ export class StudentController {
   static async createStudent(req: AuthenticatedRequest, res: Response) {
     try {
       // Ensure user is admin
-      if (req.user?.role !== 'admin') {
+      if (req.user?.role !== UserRole.ADMIN) {
         return res.status(403).json({ error: 'Access denied. Admin privileges required.' });
       }
 
@@ -87,15 +99,16 @@ export class StudentController {
 
       const studentData: CreateStudentData = req.body;
       
-      const student = await StudentService.createStudent(studentData);
+      const student = await studentService.createStudent(studentData);
 
       return res.status(201).json({
         message: 'Student created successfully',
         student
       });
-    } catch (error) {
-      logError(error, 'StudentController.createStudent');
-      if (error.message === 'Email already registered') {
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      logError('Error creating student:', errorMessage);
+      if (error instanceof ServiceError && error.message === 'Email already registered') {
         return res.status(400).json({ error: error.message });
       }
       return res.status(500).json({ error: 'Failed to create student' });
@@ -108,19 +121,14 @@ export class StudentController {
   static async updateStudent(req: AuthenticatedRequest, res: Response) {
     try {
       // Ensure user is admin
-      if (req.user?.role !== 'admin') {
+      if (req.user?.role !== UserRole.ADMIN) {
         return res.status(403).json({ error: 'Access denied. Admin privileges required.' });
-      }
-
-      const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        return res.status(400).json({ errors: errors.array() });
       }
 
       const { id } = req.params;
       const updateData = req.body;
 
-      const student = await StudentService.updateStudent(id, updateData);
+      const student = await studentService.updateStudent(id, updateData);
 
       if (!student) {
         return res.status(404).json({ error: 'Student not found' });
@@ -130,8 +138,9 @@ export class StudentController {
         message: 'Student updated successfully',
         student
       });
-    } catch (error) {
-      logError(error, 'StudentController.updateStudent');
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      logError('Error updating student:', errorMessage);
       return res.status(500).json({ error: 'Failed to update student' });
     }
   }
@@ -142,39 +151,20 @@ export class StudentController {
   static async deleteStudent(req: AuthenticatedRequest, res: Response) {
     try {
       // Ensure user is admin
-      if (req.user?.role !== 'admin') {
+      if (req.user?.role !== UserRole.ADMIN) {
         return res.status(403).json({ error: 'Access denied. Admin privileges required.' });
       }
 
       const { id } = req.params;
-      await StudentService.deleteStudent(id);
+      await studentService.deleteStudent(id);
 
       return res.status(200).json({
         message: 'Student deleted successfully'
       });
-    } catch (error) {
-      logError(error, 'StudentController.deleteStudent');
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      logError('Error deleting student:', errorMessage);
       return res.status(500).json({ error: 'Failed to delete student' });
-    }
-  }
-
-  /**
-   * Get student's academic progress
-   */
-  static async getStudentProgress(req: AuthenticatedRequest, res: Response) {
-    try {
-      // Ensure user is admin
-      if (req.user?.role !== 'admin') {
-        return res.status(403).json({ error: 'Access denied. Admin privileges required.' });
-      }
-
-      const { id } = req.params;
-      const progress = await StudentService.getStudentProgress(id);
-
-      return res.status(200).json({ progress });
-    } catch (error) {
-      logError(error, 'StudentController.getStudentProgress');
-      return res.status(500).json({ error: 'Failed to fetch student progress' });
     }
   }
 }

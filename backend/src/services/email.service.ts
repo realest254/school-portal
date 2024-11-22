@@ -83,31 +83,31 @@ export class EmailService {
       // Get the appropriate template
       const template = this.getTemplate(role);
 
-      // Create signup URL with encrypted invite ID
-      const encryptedId = encrypt(inviteId);
-      const signupUrl = `${frontendUrl}/auth/signup?token=${encryptedId}`;
+      // Create token with all invite data
+      const tokenData = {
+        id: inviteId,
+        email: email,
+        role: role
+      };
+      const encryptedToken = encrypt(tokenData);
+      const signupUrl = `${frontendUrl}/auth/signup?token=${encryptedToken}`;
 
       // Replace template variables
       const htmlContent = this.replaceTemplateVariables(template.body, {
-        signupUrl,
-        role: role.toLowerCase()
+        signupUrl
       });
 
-      // Send email using Supabase Edge Function
-      const { error } = await supabase.functions.invoke('send-email', {
-        body: {
-          to: email,
-          subject: template.subject,
-          html: htmlContent,
-          from: process.env.SMTP_FROM || 'noreply@schoolportal.com'
-        }
+      // Send email using Supabase
+      const { error } = await supabase.auth.api.sendEmail(email, {
+        subject: template.subject,
+        html: htmlContent
       });
 
       if (error) {
-        throw new Error(`Failed to send invite email: ${error.message}`);
+        throw error;
       }
     } catch (error) {
-      console.error('Error sending invite email:', error);
+      console.error('Failed to send invite email:', error);
       throw error;
     }
   }

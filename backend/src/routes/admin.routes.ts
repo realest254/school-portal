@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { verifyToken, requireRole, UserRole } from '../middlewares/auth.middleware';
 import { StudentController } from '../controllers/student.controller';
-import { TeacherController } from '../controllers/teacher.controller';
+import { teacherController } from '../controllers/teacher.controller';
 import { NotificationController } from '../controllers/notification.controller';
 import { IndisciplineController } from '../controllers/indiscipline.controller';
 import { teacherValidation, studentValidation, notificationValidation } from '../validators/admin.validator';
@@ -64,11 +64,11 @@ router.put('/students/:id', studentValidation.update, StudentController.updateSt
 router.delete('/students/:id', StudentController.deleteStudent);
 
 // Teacher Routes
-router.get('/teachers', TeacherController.getTeachers);
-router.get('/teachers/:id', TeacherController.getTeacherById);
-router.post('/teachers', teacherValidation.create, TeacherController.createTeacher);
-router.put('/teachers/:id', teacherValidation.update, TeacherController.updateTeacher);
-router.delete('/teachers/:id', TeacherController.deleteTeacher);
+router.get('/teachers', teacherController.getTeachers.bind(teacherController));
+router.get('/teachers/:id', teacherController.getTeacherByIdentifier.bind(teacherController));
+router.post('/teachers', teacherValidation.create, teacherController.createTeacher.bind(teacherController));
+router.put('/teachers/:id', teacherValidation.update, teacherController.updateTeacher.bind(teacherController));
+router.delete('/teachers/:id', teacherController.deleteTeacher.bind(teacherController));
 
 // Indiscipline Routes
 router.post(

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { authService } from '../../services/auth.service'
+import { inviteService } from '../../services/invite.service'
 
 export function SignUpForm() {
   const [searchParams] = useSearchParams()
@@ -15,19 +16,44 @@ export function SignUpForm() {
   const [error, setError] = useState(null)
   const [inviteDetails, setInviteDetails] = useState(null)
 
-  // Get invite details from URL parameters
+  // Validate token from URL parameters
   useEffect(() => {
-    const email = searchParams.get('email')
-    const role = searchParams.get('role')
-    const inviteId = searchParams.get('invite_id')
+    const validateInvite = async () => {
+      try {
+        const token = searchParams.get('token')
+        if (!token) {
+          setError('Invalid invite link. Missing token.')
+          return
+        }
 
-    if (email && role && inviteId) {
-      setInviteDetails({ email, role, inviteId })
-      setFormData(prev => ({ ...prev, email }))
-    } else {
-      setError('Invalid invite link. Please request a new invitation.')
+        const { valid, reason, invite } = await inviteService.validateToken(token)
+        
+        if (!valid) {
+          setError(getErrorMessage(reason))
+          return
+        }
+
+        setInviteDetails(invite)
+        setFormData(prev => ({ ...prev, email: invite.email }))
+      } catch (err) {
+        setError('Invalid or expired invite link.')
+      }
     }
+
+    validateInvite()
   }, [searchParams])
+
+  const getErrorMessage = (reason) => {
+    switch (reason) {
+      case 'expired':
+        return 'This invite has expired. Please request a new one.'
+      case 'already_used':
+        return 'This invite has already been used.'
+      case 'invalid':
+      default:
+        return 'Invalid invite link. Please request a new invitation.'
+    }
+  }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -45,7 +71,7 @@ export function SignUpForm() {
       const { user } = await authService.signUpWithInvite(
         inviteDetails.email,
         formData.password,
-        inviteDetails.inviteId
+        inviteDetails.id
       )
 
       // Redirect based on role
@@ -100,43 +126,35 @@ export function SignUpForm() {
             <input
               type="password"
               value={formData.password}
-              onChange={(e) => setFormData(prev => ({ 
-                ...prev, 
-                password: e.target.value 
-              }))}
-              className="w-full p-2 border rounded"
+              onChange={(e) => setFormData({ ...formData, password: e.target.value })}
               required
-              minLength={8}
+              className="w-full p-2 border rounded"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium mb-1">
-              Confirm Password
-            </label>
+            <label className="block text-sm font-medium mb-1">Confirm Password</label>
             <input
               type="password"
               value={formData.confirmPassword}
-              onChange={(e) => setFormData(prev => ({ 
-                ...prev, 
-                confirmPassword: e.target.value 
-              }))}
-              className="w-full p-2 border rounded"
+              onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
               required
-              minLength={8}
+              className="w-full p-2 border rounded"
             />
           </div>
 
           {error && (
-            <div className="text-red-500 text-sm">{error}</div>
+            <div className="text-red-600 text-sm">
+              {error}
+            </div>
           )}
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-blue-500 text-white p-2 rounded hover:bg-blue-600 disabled:opacity-50"
+            className="w-full bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700 disabled:opacity-50"
           >
-            {loading ? 'Creating Account...' : 'Complete Registration'}
+            {loading ? 'Creating Account...' : 'Create Account'}
           </button>
         </form>
       </div>

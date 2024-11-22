@@ -1,14 +1,10 @@
 import { Request, Response, NextFunction } from 'express';
-import jwt from 'jsonwebtoken';
-import { logError } from '../utils/logger';
-import pool from '../db';
-import { JWT_SECRET } from '../config';
+import { supabase } from '../config/supabase';
 
 export enum UserRole {
   ADMIN = 'admin',
   TEACHER = 'teacher',
-  STUDENT = 'student',
-  PARENT = 'parent'
+  STUDENT = 'student'
 }
 
 interface JwtPayload {
@@ -33,41 +29,38 @@ export const verifyToken = async (req: Request, res: Response, next: NextFunctio
       return res.status(401).json({ message: 'No token provided' });
     }
 
-    // Verify the token
-    const decoded = jwt.verify(token, JWT_SECRET) as JwtPayload;
+    // Verify token using Supabase
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+    
+    if (error || !user) {
+      return res.status(401).json({ message: 'Invalid token' });
+    }
 
-    // Get user from our database
-    const { rows } = await pool.query(
-      'SELECT id, email, role FROM profiles WHERE email = $1',
-      [decoded.email]
-    );
+    // Get user's role from metadata
+    const role = user.user_metadata?.role;
 
-    if (rows.length === 0) {
-      return res.status(404).json({ message: 'User not found' });
+    if (!role) {
+      return res.status(401).json({ message: 'User role not found' });
     }
 
     // Attach user to request
-    req.user = rows[0];
+    req.user = {
+      id: user.id,
+      email: user.email!,
+      role: role as UserRole
+    };
+
     next();
   } catch (error) {
-    logError(error, 'Auth Middleware - Token Verification');
-    if (error instanceof jwt.JsonWebTokenError) {
-      return res.status(401).json({ message: 'Invalid token' });
-    }
-    return res.status(500).json({ message: 'Internal server error' });
+    res.status(401).json({ message: 'Authentication failed' });
   }
 };
 
 export const requireRole = (role: UserRole) => {
   return (req: Request, res: Response, next: NextFunction) => {
-    if (!req.user) {
-      return res.status(401).json({ message: 'Authentication required' });
-    }
-
-    if (req.user.role !== role) {
+    if (req.user?.role !== role) {
       return res.status(403).json({ message: 'Insufficient permissions' });
     }
-
     next();
   };
 };

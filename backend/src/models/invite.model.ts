@@ -1,24 +1,17 @@
 import { z } from 'zod';
-import { UserRole } from '../middlewares/auth.middleware';
-
-// Convert UserRole enum to union type for Zod
-type UserRoleType = `${UserRole}`;
-const userRoles: [UserRoleType, ...UserRoleType[]] = [
-  'student' as UserRoleType,
-  'teacher' as UserRoleType,
-  'admin' as UserRoleType
-];
+import { UserRole, InviteStatus } from '../types/invite.types';
 
 export const InviteSchema = z.object({
   id: z.string().uuid(),
   email: z.string().email(),
-  role: z.enum(userRoles),
-  status: z.enum(['pending', 'accepted', 'expired']),
+  role: z.nativeEnum(UserRole),
+  status: z.nativeEnum(InviteStatus),
   invited_by: z.string().uuid(),
-  accepted_by: z.string().uuid().optional(),
+  accepted_by: z.string().uuid().nullable(),
   created_at: z.date(),
-  accepted_at: z.date().optional(),
-  expiration_date: z.date().optional()
+  accepted_at: z.date().nullable(),
+  expiration_date: z.date(),
+  updated_at: z.date()
 });
 
 export type Invite = z.infer<typeof InviteSchema>;
@@ -37,10 +30,11 @@ export interface InviteResponse {
   id: string;
   email: string;
   role: UserRole;
-  status: string;
+  status: InviteStatus;
   invited_by: string;
   accepted_by?: string;
   created_at: string;
   accepted_at?: string;
-  expiration_date?: string;
+  expiration_date: string;
+  updated_at: string;
 }
