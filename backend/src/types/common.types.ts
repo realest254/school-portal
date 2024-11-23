@@ -51,7 +51,8 @@ export class ServiceError extends Error {
 // Common response types
 export interface ServiceResult<T> {
   success: boolean;
-  data: T;
+  data: T | null;
+  error?: string;
 }
 
 // Pagination types

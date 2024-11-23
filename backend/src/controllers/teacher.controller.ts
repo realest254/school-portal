@@ -73,7 +73,7 @@ export class TeacherController {
         name: req.body.name,
         email: req.body.email,
         phone: req.body.phone,
-        subjectIds: req.body.subjectIds,
+        subjects: req.body.subjects,
         employeeId: req.body.employeeId,
         joinDate: req.body.joinDate
       });
@@ -100,7 +100,7 @@ export class TeacherController {
         name: req.body.name,
         email: req.body.email,
         phone: req.body.phone,
-        subjectIds: req.body.subjectIds,
+        subjects: req.body.subjects,
         employeeId: req.body.employeeId,
         joinDate: req.body.joinDate,
         status: req.body.status
