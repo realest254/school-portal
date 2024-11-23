@@ -32,7 +32,7 @@ export class DuplicateStudentError extends ServiceError {
 const StudentSchema = z.object({
   id: z.string().uuid(),
   name: z.string().min(2).max(100),
-  admissionNumber: z.string().min(3).max(20),
+  studentId: z.string().min(3).max(20),
   email: z.string().email(),
   class: z.string(),
   parentPhone: z.string().regex(/^\+?[\d\s-()]{10,}$/),
@@ -52,7 +52,7 @@ interface StudentFilters extends PaginationParams {
 
 interface CreateStudentData {
   name: string;
-  admissionNumber: string;
+  studentId: string;
   email: string;
   class: string;
   parentPhone: string;
@@ -61,7 +61,7 @@ interface CreateStudentData {
 
 interface UpdateStudentData {
   name?: string;
-  admissionNumber?: string;
+  studentId?: string;
   email?: string;
   class?: string;
   parentPhone?: string;
@@ -92,12 +92,33 @@ export class StudentService {
     }
   }
 
+  private async getClassIdByName(client: any, className: string): Promise<string> {
+    const query = SQL`
+      SELECT id 
+      FROM classes 
+      WHERE name = ${className}
+    `;
+
+    const { rows } = await client.query(query);
+    
+    if (rows.length === 0) {
+      throw new ServiceError(`Class not found: ${className}`, 'CLASS_NOT_FOUND');
+    }
+
+    return rows[0].id;
+  }
+
   async getStudents(filters: StudentFilters = {}): Promise<PaginatedResult<Student[]>> {
     try {
+      StudentService.validateFilters(filters);
+
       const query = SQL`
-        SELECT s.*, c.name as class_name 
+        SELECT 
+          s.*,
+          c.name as class_name
         FROM students s
-        LEFT JOIN classes c ON s.class_id = c.id
+        LEFT JOIN class_students cs ON s.id = cs.student_id
+        LEFT JOIN classes c ON cs.class_id = c.id
         WHERE 1=1
       `;
 
@@ -109,7 +130,7 @@ export class StudentService {
         query.append(SQL` AND (
           s.name ILIKE ${`%${filters.search}%`} OR
           s.email ILIKE ${`%${filters.search}%`} OR
-          s.admission_number ILIKE ${`%${filters.search}%`}
+          s.student_id ILIKE ${`%${filters.search}%`}
         )`);
       }
 
@@ -137,7 +158,7 @@ export class StudentService {
 
       const students = rows.map(row => ({
         ...row,
-        class: row.class_name // Map the joined class_name back to class for backward compatibility
+        class: row.class_name
       }));
 
       return {
@@ -156,23 +177,23 @@ export class StudentService {
     }
   }
 
-  /**
-   * Get a student by identifier (id, admission number, or email)
-   */
-  async getStudentByIdentifier(identifier: { id?: string; admissionNumber?: string; email?: string }): Promise<ServiceResult<Student>> {
+  async getStudentByIdentifier(identifier: { id?: string; studentId?: string; email?: string }): Promise<ServiceResult<Student>> {
     try {
       const query = SQL`
-        SELECT s.*, c.name as class_name 
+        SELECT 
+          s.*,
+          c.name as class_name
         FROM students s
-        LEFT JOIN classes c ON s.class_id = c.id
+        LEFT JOIN class_students cs ON s.id = cs.student_id
+        LEFT JOIN classes c ON cs.class_id = c.id
         WHERE 1=0
       `;
 
       if (identifier.id) {
         query.append(SQL` OR s.id = ${identifier.id}`);
       }
-      if (identifier.admissionNumber) {
-        query.append(SQL` OR s.admission_number = ${identifier.admissionNumber}`);
+      if (identifier.studentId) {
+        query.append(SQL` OR s.student_id = ${identifier.studentId}`);
       }
       if (identifier.email) {
         query.append(SQL` OR s.email = ${identifier.email}`);
@@ -186,7 +207,7 @@ export class StudentService {
 
       const student = {
         ...rows[0],
-        class: rows[0].class_name // Map the joined class_name back to class for backward compatibility
+        class: rows[0].class_name
       };
 
       return {
@@ -209,49 +230,49 @@ export class StudentService {
       await client.query('BEGIN');
 
       // Get class_id from class name
-      const { rows: [classRow] } = await client.query(SQL`
-        SELECT id FROM classes WHERE name = ${data.class}
-      `);
-
-      if (!classRow) {
-        throw new ServiceError(`Class "${data.class}" not found`, 'CLASS_NOT_FOUND', 404);
-      }
+      const classId = await this.getClassIdByName(client, data.class);
 
       // Validate data schema
-      const StudentSchema = z.object({
+      const CreateStudentSchema = z.object({
         name: z.string().min(2).max(100),
-        admissionNumber: z.string().min(3).max(20),
+        studentId: z.string().min(3).max(20),
         email: z.string().email(),
         class: z.string(),
         parentPhone: z.string().regex(/^\+?[\d\s-()]{10,}$/),
         dob: z.string().datetime()
       });
 
-      StudentSchema.parse(data);
+      CreateStudentSchema.parse(data);
 
-      // Check for duplicate email or admission number
+      // Check for duplicate email or student ID
       const existingStudent = await this.getStudentByIdentifier({
         email: data.email,
-        admissionNumber: data.admissionNumber
+        studentId: data.studentId
       }).catch(() => null);
 
       if (existingStudent?.data) {
         throw new DuplicateStudentError(
-          existingStudent.data.email === data.email ? 'email' : 'admission number'
+          existingStudent.data.email === data.email ? 'email' : 'student ID'
         );
       }
 
-      const query = SQL`
+      // 1. Create student record
+      const { rows: [student] } = await client.query(SQL`
         INSERT INTO students (
-          name, admission_number, email, class_id, parent_phone, dob, status
+          name, student_id, email, parent_phone, dob, status
         ) VALUES (
-          ${data.name}, ${data.admissionNumber}, ${data.email}, 
-          ${classRow.id}, ${data.parentPhone}, ${data.dob}, 'active'
+          ${data.name}, ${data.studentId}, ${data.email}, 
+          ${data.parentPhone}, ${data.dob}, 'active'
         )
         RETURNING id
-      `;
+      `);
 
-      const { rows: [student] } = await client.query(query);
+      // 2. Link student to class
+      await client.query(SQL`
+        INSERT INTO class_students (student_id, class_id)
+        VALUES (${student.id}, ${classId})
+      `);
+
       await client.query('COMMIT');
 
       logInfo(`Created student: ${student.id}`);
@@ -283,12 +304,12 @@ export class StudentService {
       await client.query('BEGIN');
 
       // Check if student exists
-      const existingStudent = await this.getStudentByIdentifier({ id });
+      await this.getStudentByIdentifier({ id });
 
       // Validate update data
       const UpdateStudentSchema = z.object({
         name: z.string().min(2).max(100).optional(),
-        admissionNumber: z.string().min(3).max(20).optional(),
+        studentId: z.string().min(3).max(20).optional(),
         email: z.string().email().optional(),
         class: z.string().optional(),
         parentPhone: z.string().regex(/^\+?[\d\s-()]{10,}$/).optional(),
@@ -298,74 +319,80 @@ export class StudentService {
 
       UpdateStudentSchema.parse(data);
 
-      // Check for duplicates if email or admission number is being updated
-      if (data.email || data.admissionNumber) {
+      // Check for duplicates if email or student ID is being updated
+      if (data.email || data.studentId) {
         const duplicateCheck = await this.getStudentByIdentifier({
           email: data.email,
-          admissionNumber: data.admissionNumber
+          studentId: data.studentId
         }).catch(() => null);
 
         if (duplicateCheck?.data && duplicateCheck.data.id !== id) {
           throw new DuplicateStudentError(
-            duplicateCheck.data.email === data.email ? 'email' : 'admission number'
+            duplicateCheck.data.email === data.email ? 'email' : 'student ID'
           );
         }
       }
 
-      const setValues: ReturnType<typeof SQL>[] = [];
-      const queryParts: string[] = [];
+      // 1. Update basic student info
+      const updateParts: string[] = [];
+      const updateValues: any[] = [id];
+      let paramCount = 2;
 
-      if (data.name !== undefined) {
-        queryParts.push('name = ');
-        setValues.push(SQL`${data.name}`);
+      if (data.name) {
+        updateParts.push(`name = $${paramCount}`);
+        updateValues.push(data.name);
+        paramCount++;
       }
-      if (data.admissionNumber !== undefined) {
-        queryParts.push('admission_number = ');
-        setValues.push(SQL`${data.admissionNumber}`);
+      if (data.studentId) {
+        updateParts.push(`student_id = $${paramCount}`);
+        updateValues.push(data.studentId);
+        paramCount++;
       }
-      if (data.email !== undefined) {
-        queryParts.push('email = ');
-        setValues.push(SQL`${data.email}`);
+      if (data.email) {
+        updateParts.push(`email = $${paramCount}`);
+        updateValues.push(data.email);
+        paramCount++;
       }
-      if (data.class !== undefined) {
-        // Get class_id from class name
-        const { rows: [classRow] } = await client.query(SQL`
-          SELECT id FROM classes WHERE name = ${data.class}
+      if (data.parentPhone) {
+        updateParts.push(`parent_phone = $${paramCount}`);
+        updateValues.push(data.parentPhone);
+        paramCount++;
+      }
+      if (data.dob) {
+        updateParts.push(`dob = $${paramCount}`);
+        updateValues.push(data.dob);
+        paramCount++;
+      }
+      if (data.status) {
+        updateParts.push(`status = $${paramCount}`);
+        updateValues.push(data.status);
+        paramCount++;
+      }
+
+      if (updateParts.length > 0) {
+        await client.query(
+          `UPDATE students SET ${updateParts.join(', ')} WHERE id = $1`,
+          updateValues
+        );
+      }
+
+      // 2. Update class if provided
+      if (data.class) {
+        const classId = await this.getClassIdByName(client, data.class);
+        
+        // Remove existing class relationship
+        await client.query(SQL`
+          DELETE FROM class_students
+          WHERE student_id = ${id}
         `);
 
-        if (!classRow) {
-          throw new ServiceError(`Class "${data.class}" not found`, 'CLASS_NOT_FOUND', 404);
-        }
-
-        queryParts.push('class_id = ');
-        setValues.push(SQL`${classRow.id}`);
-      }
-      if (data.parentPhone !== undefined) {
-        queryParts.push('parent_phone = ');
-        setValues.push(SQL`${data.parentPhone}`);
-      }
-      if (data.dob !== undefined) {
-        queryParts.push('dob = ');
-        setValues.push(SQL`${data.dob}`);
-      }
-      if (data.status !== undefined) {
-        queryParts.push('status = ');
-        setValues.push(SQL`${data.status}`);
+        // Add new class relationship
+        await client.query(SQL`
+          INSERT INTO class_students (student_id, class_id)
+          VALUES (${id}, ${classId})
+        `);
       }
 
-      if (setValues.length === 0) {
-        return this.getStudentByIdentifier({ id });
-      }
-
-      const setClause = queryParts.map((part, i) => part + setValues[i]).join(', ');
-      const query = SQL`
-        UPDATE students 
-        SET ${setClause} 
-        WHERE id = ${id}
-        RETURNING id
-      `;
-
-      const { rows: [student] } = await client.query(query);
       await client.query('COMMIT');
 
       logInfo(`Updated student: ${id}`);
@@ -392,29 +419,34 @@ export class StudentService {
   }
 
   async deleteStudent(id: string): Promise<ServiceResult<null>> {
+    const client = await pool.connect();
     try {
-      const uuid = createUUID(id);
+      await client.query('BEGIN');
 
-      const query = SQL`
-        DELETE FROM students 
-        WHERE id = ${uuid} 
-        RETURNING id
-      `;
-      
-      const { rows: [student] } = await pool.query(query);
-      
-      if (student) {
-        logInfo(`Deleted student: ${id}`);
+      // Check if student exists
+      const { rows } = await client.query(SQL`
+        SELECT id FROM students WHERE id = ${id}
+      `);
+
+      if (rows.length === 0) {
+        throw new StudentNotFoundError(id);
       }
+
+      // Delete from junction tables first (should cascade, but being explicit)
+      await client.query(SQL`DELETE FROM class_students WHERE student_id = ${id}`);
+      
+      // Delete student
+      await client.query(SQL`DELETE FROM students WHERE id = ${id}`);
+
+      await client.query('COMMIT');
+      logInfo(`Deleted student: ${id}`);
       return { success: true, data: null };
+
     } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-      logError('Error deleting student:', errorMessage);
-      throw new ServiceError(
-        'Failed to delete student',
-        'DELETE_STUDENT_FAILED',
-        500
-      );
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
     }
   }
 }
