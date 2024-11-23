@@ -1,34 +1,52 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Users, 
   UserCheck, 
   AlertTriangle, 
-  TrendingUp, 
-  TrendingDown,
   Clock
 } from 'lucide-react';
+import axios from '../../utils/axios';
 
 const Overview = () => {
+  const [stats, setStats] = useState({
+    students: { total: 0 },
+    teachers: { total: 0 }
+  });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    const fetchStats = async () => {
+      try {
+        setLoading(true);
+        const response = await axios.get('/dashboard/stats/basic');
+        setStats(response.data.stats);
+        setError(null);
+      } catch (err) {
+        console.error('Error fetching stats:', err);
+        setError('Failed to load statistics');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchStats();
+  }, []);
+
   const metrics = [
     { 
       label: 'Total Students', 
-      value: '1,234', 
-      change: '+5%', 
-      trend: 'positive',
+      value: loading ? '...' : stats.students.total.toString(), 
       icon: <Users className="w-6 h-6 text-blue-600 dark:text-blue-400" />
     },
     { 
       label: 'Total Teachers', 
-      value: '89', 
-      change: '+2%', 
-      trend: 'positive',
+      value: loading ? '...' : stats.teachers.total.toString(),
       icon: <UserCheck className="w-6 h-6 text-green-600 dark:text-green-400" />
     },
     { 
       label: 'Indiscipline Cases', 
-      value: '23', 
-      change: '-10%', 
-      trend: 'negative',
+      value: '0', 
       icon: <AlertTriangle className="w-6 h-6 text-red-600 dark:text-red-400" />
     }
   ];
@@ -48,96 +66,67 @@ const Overview = () => {
       type: 'discipline',
       description: 'Disciplinary action recorded for Grade 8',
       time: '5 hours ago'
-    },
-    {
-      type: 'academic',
-      description: 'Term results uploaded for Grade 12',
-      time: '1 day ago'
     }
   ];
 
-  const quickStats = [
-    { label: 'Attendance Rate', value: '95%' },
-    { label: 'Average GPA', value: '3.5' },
-    { label: 'Active Classes', value: '32' },
-    { label: 'Upcoming Events', value: '8' }
-  ];
+  if (error) {
+    return (
+      <div className="p-4 text-red-500 text-center">
+        {error}
+      </div>
+    );
+  }
 
   return (
-    <div className="w-full p-6 space-y-6">
+    <div className="p-4">
+      <h1 className="text-2xl font-bold mb-6">Dashboard Overview</h1>
+      
       {/* Metrics Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
         {metrics.map((metric, index) => (
-          <div
+          <div 
             key={index}
-            className="p-6 rounded-lg bg-white dark:bg-gray-800 shadow-sm border border-gray-200 dark:border-gray-700"
+            className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700"
           >
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600 dark:text-gray-400">
-                  {metric.label}
-                </p>
-                <p className="mt-2 text-3xl font-semibold text-gray-900 dark:text-white">
-                  {metric.value}
-                </p>
+            <div className="flex items-center justify-between mb-4">
+              <div className="bg-gray-100 dark:bg-gray-700 p-3 rounded-lg">
+                {metric.icon}
               </div>
-              <div>{metric.icon}</div>
             </div>
-            <div className="mt-4 flex items-center">
-              {metric.trend === 'positive' ? (
-                <TrendingUp className="w-4 h-4 text-green-500 dark:text-green-400" />
-              ) : (
-                <TrendingDown className="w-4 h-4 text-red-500 dark:text-red-400" />
-              )}
-              <span className={`ml-2 text-sm font-medium ${
-                metric.trend === 'positive' 
-                  ? 'text-green-600 dark:text-green-400' 
-                  : 'text-red-600 dark:text-red-400'
-              }`}>
-                {metric.change}
+            <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">
+              {metric.label}
+            </h3>
+            <div className="flex items-center mt-2">
+              <span className="text-2xl font-bold text-gray-900 dark:text-white mr-2">
+                {metric.value}
               </span>
             </div>
           </div>
         ))}
       </div>
 
-      {/* Content Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-2 gap-6">
-        {/* Recent Activities Card */}
-        <div className="rounded-lg bg-white dark:bg-gray-800 shadow-sm border border-gray-200 dark:border-gray-700">
-          <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-            <h3 className="text-lg font-medium text-gray-900 dark:text-white">Recent Activities</h3>
-          </div>
-          <div className="divide-y divide-gray-200 dark:divide-gray-700">
-            {recentActivities.map((activity, index) => (
-              <div key={index} className="px-6 py-4">
-                <div className="flex items-center">
-                  <Clock className="w-5 h-5 text-gray-400 dark:text-gray-500" />
-                  <div className="ml-4">
-                    <p className="text-sm font-medium text-gray-900 dark:text-white">
-                      {activity.description}
-                    </p>
-                    <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                      {activity.time}
-                    </p>
-                  </div>
-                </div>
+      {/* Recent Activity */}
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+        <h2 className="text-lg font-semibold mb-4">Recent Activity</h2>
+        <div className="space-y-4">
+          {recentActivities.map((activity, index) => (
+            <div 
+              key={index}
+              className="flex items-start space-x-4 p-3 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-lg transition-colors"
+            >
+              <div className="flex-shrink-0">
+                <Clock className="w-5 h-5 text-gray-400" />
               </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Quick Stats Card */}
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-6">
-          <h2 className="text-lg font-medium text-gray-900 dark:text-white mb-4">Quick Stats</h2>
-          <div className="grid grid-cols-2 gap-4">
-            {quickStats.map((stat, index) => (
-              <div key={index} className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
-                <p className="text-sm text-gray-600 dark:text-gray-400">{stat.label}</p>
-                <p className="mt-1 text-xl font-semibold text-gray-900 dark:text-white">{stat.value}</p>
+              <div className="flex-1">
+                <p className="text-sm text-gray-900 dark:text-white">
+                  {activity.description}
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  {activity.time}
+                </p>
               </div>
-            ))}
-          </div>
+            </div>
+          ))}
         </div>
       </div>
     </div>
