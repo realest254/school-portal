@@ -90,6 +90,12 @@ export class StudentService {
     if (filters.search) {
       z.string().max(100).parse(filters.search);
     }
+    if (filters.page) {
+      z.number().positive().parse(filters.page);
+    }
+    if (filters.limit) {
+      z.number().positive().max(100).parse(filters.limit);
+    }
   }
 
   private async getClassIdByName(client: any, className: string): Promise<string> {
@@ -141,15 +147,16 @@ export class StudentService {
       // Add ordering
       query.append(SQL` ORDER BY s.name`);
 
+      // Get total count
+      const countQuery = SQL`SELECT COUNT(*) as count FROM (${query}) as subquery`;
+      const { rows: [{ count }] } = await pool.query(countQuery);
+
       // Add pagination
       const page = filters.page || 1;
       const limit = filters.limit || 10;
       const offset = (page - 1) * limit;
-
-      const countQuery = SQL`SELECT COUNT(*) FROM (${query}) as count_query`;
-      const { rows: [{ count }] } = await pool.query(countQuery);
-
       query.append(SQL` LIMIT ${limit} OFFSET ${offset}`);
+
       const { rows } = await pool.query(query);
 
       if (rows.length === 0 && filters.class) {
@@ -163,14 +170,12 @@ export class StudentService {
 
       return {
         data: students,
-        total: parseInt(count),
+        total: Number(count),
         page,
         limit
       };
-    } catch (error: unknown) {
-      if (error instanceof ServiceError) {
-        throw error;
-      }
+    } catch (error) {
+      if (error instanceof ServiceError) throw error;
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
       logError('Error fetching students:', errorMessage);
       throw new ServiceError('Failed to fetch students', 'FETCH_ERROR');
@@ -224,12 +229,33 @@ export class StudentService {
     }
   }
 
+  private async checkStudentDuplicates(client: any, email: string, studentId: string): Promise<void> {
+    // Check for duplicate email
+    const { rows: emailCheck } = await client.query(SQL`
+      SELECT email FROM students WHERE email = ${email}
+    `);
+    if (emailCheck.length > 0) {
+      throw new DuplicateStudentError('email');
+    }
+
+    // Check for duplicate student ID
+    const { rows: studentIdCheck } = await client.query(SQL`
+      SELECT student_id FROM students WHERE student_id = ${studentId}
+    `);
+    if (studentIdCheck.length > 0) {
+      throw new DuplicateStudentError('student ID');
+    }
+  }
+
   async createStudent(data: CreateStudentData): Promise<ServiceResult<Student>> {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
 
-      // Get class_id from class name
+      // Check for duplicates
+      await this.checkStudentDuplicates(client, data.email, data.studentId);
+
+      // Get class ID
       const classId = await this.getClassIdByName(client, data.class);
 
       // Validate data schema
@@ -243,18 +269,6 @@ export class StudentService {
       });
 
       CreateStudentSchema.parse(data);
-
-      // Check for duplicate email or student ID
-      const existingStudent = await this.getStudentByIdentifier({
-        email: data.email,
-        studentId: data.studentId
-      }).catch(() => null);
-
-      if (existingStudent?.data) {
-        throw new DuplicateStudentError(
-          existingStudent.data.email === data.email ? 'email' : 'student ID'
-        );
-      }
 
       // 1. Create student record
       const { rows: [student] } = await client.query(SQL`
@@ -321,16 +335,7 @@ export class StudentService {
 
       // Check for duplicates if email or student ID is being updated
       if (data.email || data.studentId) {
-        const duplicateCheck = await this.getStudentByIdentifier({
-          email: data.email,
-          studentId: data.studentId
-        }).catch(() => null);
-
-        if (duplicateCheck?.data && duplicateCheck.data.id !== id) {
-          throw new DuplicateStudentError(
-            duplicateCheck.data.email === data.email ? 'email' : 'student ID'
-          );
-        }
+        await this.checkStudentDuplicates(client, data.email || '', data.studentId || '');
       }
 
       // 1. Update basic student info

@@ -6,12 +6,18 @@ import AddStudentModal from '../../components/dashboards/admin/pages/StudentsMan
 import EditStudentModal from '../../components/dashboards/admin/pages/StudentsManagement/EditStudentModal';
 import DeleteStudentModal from '../../components/dashboards/admin/pages/StudentsManagement/DeleteStudentModal';
 import { useTheme } from '../../contexts/ThemeContext';
+import { StudentService } from '../../services/student.service';
 
 const { Title } = Typography;
 
 const StudentsPage = () => {
   const [students, setStudents] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [pagination, setPagination] = useState({
+    current: 1,
+    pageSize: 10,
+    total: 0
+  });
   const [searchParams, setSearchParams] = useState({});
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [isAddModalVisible, setIsAddModalVisible] = useState(false);
@@ -19,71 +25,85 @@ const StudentsPage = () => {
   const [isDeleteModalVisible, setIsDeleteModalVisible] = useState(false);
   const { isDarkMode } = useTheme();
 
-  // Mock student data
+  const fetchStudents = async (page = 1, limit = 10) => {
+    try {
+      setLoading(true);
+      const response = await StudentService.getStudents({
+        page,
+        limit,
+        ...searchParams
+      });
+      
+      setStudents(response.data);
+      setPagination({
+        current: page,
+        pageSize: limit,
+        total: response.total
+      });
+    } catch (error) {
+      message.error('Failed to fetch students');
+      console.error('Error fetching students:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    setStudents([
-      {
-        id: '1',
-        name: 'John Smith',
-        admissionNumber: 'STD2024001',
-        email: 'john.smith@school.com',
-        class: '10A',
-        parentPhone: '+1234567890',
-        dob: '2008-05-15'
-      },
-      {
-        id: '2',
-        name: 'Sarah Johnson',
-        admissionNumber: 'STD2024002',
-        email: 'sarah.j@school.com',
-        class: '10B',
-        parentPhone: '+1234567891',
-        dob: '2008-07-22'
-      },
-      {
-        id: '3',
-        name: 'Michael Brown',
-        admissionNumber: 'STD2024003',
-        email: 'michael.b@school.com',
-        class: '10A',
-        parentPhone: '+1234567892',
-        dob: '2008-03-10'
-      },
-      {
-        id: '4',
-        name: 'Emily Davis',
-        admissionNumber: 'STD2024004',
-        email: 'emily.d@school.com',
-        class: '10C',
-        parentPhone: '+1234567893',
-        dob: '2008-11-30'
-      }
-    ]);
-  }, []);
+    fetchStudents(pagination.current, pagination.pageSize);
+  }, [searchParams]);
+
+  const handleTableChange = (pagination, filters, sorter) => {
+    fetchStudents(pagination.current, pagination.pageSize);
+  };
 
   const handleSearch = (values) => {
     setSearchParams(values);
-    // Implement search logic here
+    setPagination(prev => ({ ...prev, current: 1 })); // Reset to first page on new search
   };
 
-  const handleAddStudent = (values) => {
-    setStudents([...students, { ...values, id: Date.now().toString() }]);
-    setIsAddModalVisible(false);
-    message.success('Student added successfully');
+  const handleAddStudent = async (values) => {
+    try {
+      setLoading(true);
+      await StudentService.createStudent(values);
+      message.success('Student added successfully');
+      setIsAddModalVisible(false);
+      fetchStudents(pagination.current, pagination.pageSize);
+    } catch (error) {
+      message.error('Failed to add student');
+      console.error('Error adding student:', error);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleEditStudent = (values) => {
-    setStudents(students.map(student => 
-      student.id === selectedStudent.id ? { ...student, ...values } : student
-    ));
-    setIsEditModalVisible(false);
-    message.success('Student updated successfully');
+  const handleEditStudent = async (values) => {
+    try {
+      setLoading(true);
+      await StudentService.updateStudent(selectedStudent.id, values);
+      message.success('Student updated successfully');
+      setIsEditModalVisible(false);
+      fetchStudents(pagination.current, pagination.pageSize);
+    } catch (error) {
+      message.error('Failed to update student');
+      console.error('Error updating student:', error);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleDeleteStudent = () => {
-    setStudents(students.filter(student => student.id !== selectedStudent.id));
-    setIsDeleteModalVisible(false);
-    message.success('Student deleted successfully');
+  const handleDeleteStudent = async () => {
+    try {
+      setLoading(true);
+      await StudentService.deleteStudent(selectedStudent.id);
+      message.success('Student deleted successfully');
+      setIsDeleteModalVisible(false);
+      fetchStudents(pagination.current, pagination.pageSize);
+    } catch (error) {
+      message.error('Failed to delete student');
+      console.error('Error deleting student:', error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -97,13 +117,12 @@ const StudentsPage = () => {
           onAddNew={() => setIsAddModalVisible(true)}
         />
         
-        <Card 
-          className="overflow-x-auto"
-          styles={{ body: { padding: '1rem' } }}
-        >
-          <StudentListTable
+        <Card className="overflow-x-auto">
+          <StudentListTable 
             students={students}
             loading={loading}
+            pagination={pagination}
+            onChange={handleTableChange}
             onEdit={(student) => {
               setSelectedStudent(student);
               setIsEditModalVisible(true);
@@ -120,6 +139,7 @@ const StudentsPage = () => {
         visible={isAddModalVisible}
         onCancel={() => setIsAddModalVisible(false)}
         onSubmit={handleAddStudent}
+        loading={loading}
       />
 
       <EditStudentModal
@@ -130,6 +150,7 @@ const StudentsPage = () => {
           setSelectedStudent(null);
         }}
         onSubmit={handleEditStudent}
+        loading={loading}
       />
 
       <DeleteStudentModal
@@ -140,6 +161,7 @@ const StudentsPage = () => {
           setSelectedStudent(null);
         }}
         onConfirm={handleDeleteStudent}
+        loading={loading}
       />
     </div>
   );

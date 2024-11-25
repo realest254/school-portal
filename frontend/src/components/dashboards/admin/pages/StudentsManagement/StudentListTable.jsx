@@ -5,7 +5,14 @@ import { useWindowSize } from '../../../../../hooks/useWindowSize';
 import { useTheme } from '../../../../../contexts/ThemeContext';
 import dayjs from 'dayjs';
 
-const StudentListTable = ({ students, onEdit, onDelete, loading }) => {
+const StudentListTable = ({ 
+  students, 
+  onEdit, 
+  onDelete, 
+  loading,
+  pagination,
+  onChange
+}) => {
   const { width } = useWindowSize();
   const { isDarkMode } = useTheme();
   
@@ -107,36 +114,14 @@ const StudentListTable = ({ students, onEdit, onDelete, loading }) => {
   return (
     <div className={`w-full rounded-lg shadow-sm transition-colors duration-200 ${isDarkMode ? 'bg-gray-800' : 'bg-white'}`}>
       <Table
-        columns={getResponsiveColumns()}
         dataSource={students}
-        rowKey={record => record.id}
+        columns={getResponsiveColumns()}
         loading={loading}
-        locale={{
-          emptyText: <div className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>No students found</div>
-        }}
-        pagination={{
-          defaultPageSize: 10,
-          showSizeChanger: true,
-          showTotal: (total, range) => (
-            <span className={isDarkMode ? 'text-gray-300' : 'text-gray-600'}>
-              {range[0]}-{range[1]} of {total} students
-            </span>
-          ),
-        }}
-        className={`
-          [&_.ant-table]:!bg-transparent
-          [&_.ant-table-thead>tr>th]:!bg-transparent
-          [&_.ant-table-tbody>tr>td]:!bg-transparent
-          [&_.ant-table-tbody>tr:hover>td]:!bg-transparent
-          ${isDarkMode 
-            ? '[&_.ant-table-thead>tr>th]:!text-gray-300 [&_.ant-pagination-item-link]:!text-gray-400 [&_.ant-pagination-item]:!text-gray-400'
-            : '[&_.ant-table-thead>tr>th]:!text-gray-600'
-          }
-          ${isDarkMode
-            ? '[&_.ant-table-tbody>tr:hover>td]:!bg-gray-700/50'
-            : '[&_.ant-table-tbody>tr:hover>td]:!bg-gray-50'
-          }
-        `}
+        pagination={pagination}
+        onChange={onChange}
+        rowKey="id"
+        scroll={{ x: true }}
+        className={`${isDarkMode ? 'dark-theme' : ''}`}
       />
     </div>
   );
