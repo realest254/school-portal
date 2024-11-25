@@ -1,29 +1,43 @@
-import React from 'react';
-import { Modal, Form, Input, Select, DatePicker, Button } from 'antd';
+import React, { useState } from 'react';
+import { Modal, Form, Input, Select, DatePicker, Button, message } from 'antd';
 import { useWindowSize } from '../../../../../hooks/useWindowSize';
 import { useTheme } from '../../../../../contexts/ThemeContext';
+import { TeacherService } from '../../../../../services/teacher.service';
 
 const { Option } = Select;
 
-const AddTeacherModal = ({ visible, onCancel, onSubmit, subjects = [] }) => {
+const AddTeacherModal = ({ visible, onClose, subjects = [] }) => {
   const [form] = Form.useForm();
   const { width } = useWindowSize();
   const { isDarkMode } = useTheme();
+  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = () => {
-    form.validateFields().then((values) => {
+  const handleSubmit = async () => {
+    try {
+      const values = await form.validateFields();
+      setLoading(true);
+      
       const formattedValues = {
         ...values,
         joinDate: values.joinDate.format('YYYY-MM-DD'),
+        status: 'active'
       };
-      onSubmit(formattedValues);
+
+      await TeacherService.createTeacher(formattedValues);
+      message.success('Teacher added successfully');
       form.resetFields();
-    });
+      onClose(true);
+    } catch (error) {
+      console.error('Error adding teacher:', error);
+      message.error(error.message || 'Failed to add teacher');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleCancel = () => {
     form.resetFields();
-    onCancel();
+    onClose();
   };
 
   return (
@@ -35,7 +49,20 @@ const AddTeacherModal = ({ visible, onCancel, onSubmit, subjects = [] }) => {
       }
       open={visible}
       onCancel={handleCancel}
-      footer={null}
+      footer={[
+        <Button key="cancel" onClick={handleCancel}>
+          Cancel
+        </Button>,
+        <Button
+          key="submit"
+          type="primary"
+          loading={loading}
+          onClick={handleSubmit}
+          className={`${isDarkMode ? 'bg-blue-600 hover:bg-blue-700' : 'bg-blue-500 hover:bg-blue-600'}`}
+        >
+          Add Teacher
+        </Button>
+      ]}
       width={width >= 768 ? '60%' : '95%'}
       style={{
         top: width >= 768 ? '20%' : 10,
@@ -54,7 +81,6 @@ const AddTeacherModal = ({ visible, onCancel, onSubmit, subjects = [] }) => {
           form={form}
           layout="vertical"
           className={`w-full [&_.ant-form-item-label>label]:${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}
-          onFinish={handleSubmit}
         >
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <Form.Item
@@ -136,7 +162,7 @@ const AddTeacherModal = ({ visible, onCancel, onSubmit, subjects = [] }) => {
               rules={[{ required: true, message: 'Please select join date' }]}
             >
               <DatePicker 
-                className={`h-10 w-full ${isDarkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-700'}`} 
+                className={`w-full h-10 ${isDarkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-700'}`}
                 format="YYYY-MM-DD"
                 placeholder="Select join date"
                 popupClassName={`
@@ -147,30 +173,6 @@ const AddTeacherModal = ({ visible, onCancel, onSubmit, subjects = [] }) => {
                 `}
               />
             </Form.Item>
-          </div>
-
-          <div className={`flex justify-end gap-3 mt-6 pt-4 border-t ${isDarkMode ? 'border-gray-700' : 'border-gray-200'}`}>
-            <Button 
-              onClick={handleCancel}
-              className={`h-10 px-6 ${
-                isDarkMode 
-                  ? 'bg-gray-700 border-gray-600 text-gray-200 hover:bg-gray-600' 
-                  : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'
-              }`}
-            >
-              Cancel
-            </Button>
-            <Button 
-              type="primary" 
-              htmlType="submit"
-              className={`h-10 px-6 ${
-                isDarkMode 
-                  ? 'bg-blue-600 hover:bg-blue-700' 
-                  : 'bg-blue-500 hover:bg-blue-600'
-              }`}
-            >
-              Add Teacher
-            </Button>
           </div>
         </Form>
       </div>

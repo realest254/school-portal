@@ -1,39 +1,51 @@
-import React from 'react';
-import { Modal, Form, Input, Select, DatePicker, Button, InputNumber } from 'antd';
+import React, { useState } from 'react';
+import { Modal, Form, Input, Select, DatePicker, Button, message } from 'antd';
 import moment from 'moment';
 import { useWindowSize } from '../../../../../hooks/useWindowSize';
 import { useTheme } from '../../../../../contexts/ThemeContext';
+import { TeacherService } from '../../../../../services/teacher.service';
 
 const { Option } = Select;
 
-const EditTeacherModal = ({ visible, onCancel, onSubmit, initialData, subjects }) => {
+const EditTeacherModal = ({ visible, onClose, teacher, subjects }) => {
   const [form] = Form.useForm();
   const { width } = useWindowSize();
   const { isDarkMode } = useTheme();
+  const [loading, setLoading] = useState(false);
 
   React.useEffect(() => {
-    if (visible && initialData) {
+    if (visible && teacher) {
       form.setFieldsValue({
-        ...initialData,
-        joinDate: initialData.joinDate ? moment(initialData.joinDate) : null,
+        ...teacher,
+        joinDate: teacher.joinDate ? moment(teacher.joinDate) : null,
       });
     }
-  }, [visible, initialData, form]);
+  }, [visible, teacher, form]);
 
-  const handleSubmit = () => {
-    form.validateFields().then((values) => {
+  const handleSubmit = async () => {
+    try {
+      const values = await form.validateFields();
+      setLoading(true);
+      
       const formattedValues = {
         ...values,
-        id: initialData?.id,
         joinDate: values.joinDate?.format('YYYY-MM-DD'),
       };
-      onSubmit(formattedValues);
-    });
+
+      await TeacherService.updateTeacher(teacher.key, formattedValues);
+      message.success('Teacher updated successfully');
+      onClose(true);
+    } catch (error) {
+      console.error('Error updating teacher:', error);
+      message.error(error.response?.data?.message || 'Failed to update teacher');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleCancel = () => {
     form.resetFields();
-    onCancel();
+    onClose();
   };
 
   const inputClassName = `h-10 ${
@@ -53,7 +65,20 @@ const EditTeacherModal = ({ visible, onCancel, onSubmit, initialData, subjects }
       }
       open={visible}
       onCancel={handleCancel}
-      footer={null}
+      footer={[
+        <Button key="cancel" onClick={handleCancel}>
+          Cancel
+        </Button>,
+        <Button
+          key="submit"
+          type="primary"
+          loading={loading}
+          onClick={handleSubmit}
+          className={`${isDarkMode ? 'bg-blue-600 hover:bg-blue-700' : 'bg-blue-500 hover:bg-blue-600'}`}
+        >
+          Update Teacher
+        </Button>
+      ]}
       width={width >= 768 ? '60%' : '95%'}
       style={{
         top: width >= 768 ? '20%' : 10,
@@ -72,7 +97,6 @@ const EditTeacherModal = ({ visible, onCancel, onSubmit, initialData, subjects }
           form={form}
           layout="vertical"
           className="w-full"
-          onFinish={handleSubmit}
         >
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <Form.Item
@@ -84,6 +108,19 @@ const EditTeacherModal = ({ visible, onCancel, onSubmit, initialData, subjects }
               <Input 
                 placeholder="Enter teacher name" 
                 className={inputClassName}
+              />
+            </Form.Item>
+
+            <Form.Item
+              name="employeeId"
+              label={<span className={labelClassName}>Employee ID</span>}
+              rules={[{ required: true, message: 'Please enter employee ID' }]}
+              className="mb-4"
+            >
+              <Input 
+                placeholder="Enter employee ID" 
+                className={inputClassName}
+                disabled // Employee ID should not be editable
               />
             </Form.Item>
 
@@ -149,20 +186,25 @@ const EditTeacherModal = ({ visible, onCancel, onSubmit, initialData, subjects }
               className="mb-4"
             >
               <DatePicker 
-                className={`h-10 w-full ${
-                  isDarkMode 
-                    ? 'bg-gray-700 border-gray-600 text-white hover:border-blue-400' 
-                    : 'bg-white border-gray-300 text-gray-700 hover:border-blue-400'
-                }`}
+                className={`w-full ${inputClassName}`}
                 format="YYYY-MM-DD"
                 placeholder="Select join date"
-                popupClassName={`
-                  ${isDarkMode 
-                    ? '[&_.ant-picker-panel]:bg-gray-700 [&_.ant-picker-content]:text-white [&_.ant-picker-header]:text-gray-200 [&_.ant-picker-header-view]:text-gray-200 [&_.ant-picker-cell]:text-gray-300 [&_.ant-picker-cell-in-view]:text-white [&_.ant-picker-cell-selected]:text-blue-500'
-                    : '[&_.ant-picker-panel]:bg-white [&_.ant-picker-content]:text-gray-700 [&_.ant-picker-header]:text-gray-700 [&_.ant-picker-header-view]:text-gray-700 [&_.ant-picker-cell]:text-gray-500 [&_.ant-picker-cell-in-view]:text-gray-700 [&_.ant-picker-cell-selected]:text-blue-500'
-                  }
-                `}
               />
+            </Form.Item>
+
+            <Form.Item
+              name="status"
+              label={<span className={labelClassName}>Status</span>}
+              rules={[{ required: true, message: 'Please select status' }]}
+              className="mb-4"
+            >
+              <Select
+                className={inputClassName}
+                placeholder="Select status"
+              >
+                <Option value="active">Active</Option>
+                <Option value="inactive">Inactive</Option>
+              </Select>
             </Form.Item>
 
             <Form.Item
@@ -185,30 +227,6 @@ const EditTeacherModal = ({ visible, onCancel, onSubmit, initialData, subjects }
                 ))}
               </Select>
             </Form.Item>
-          </div>
-
-          <div className={`flex justify-end gap-3 mt-6 pt-4 border-t ${isDarkMode ? 'border-gray-700' : 'border-gray-200'}`}>
-            <Button 
-              onClick={handleCancel}
-              className={`h-10 px-6 ${
-                isDarkMode 
-                  ? 'bg-gray-700 border-gray-600 text-gray-200 hover:bg-gray-600 hover:text-white hover:border-gray-500' 
-                  : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50 hover:text-gray-700 hover:border-gray-400'
-              }`}
-            >
-              Cancel
-            </Button>
-            <Button 
-              type="primary" 
-              htmlType="submit"
-              className={`h-10 px-6 ${
-                isDarkMode 
-                  ? 'bg-blue-600 hover:bg-blue-700 border-blue-600 text-white' 
-                  : 'bg-blue-500 hover:bg-blue-600 border-blue-500 text-white'
-              }`}
-            >
-              Save Changes
-            </Button>
           </div>
         </Form>
       </div>

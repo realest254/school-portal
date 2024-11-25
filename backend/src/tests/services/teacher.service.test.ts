@@ -222,7 +222,96 @@ async function testTeacherService() {
             console.log('Results:', formatAsTable(result.data));
         }
 
-        // Test Case 8: Delete teacher and verify cascade
+        // Test Case 8: Testing pagination
+        await logTestStep('Testing pagination functionality');
+        
+        // Create additional test teachers for pagination
+        const testTeachers = [
+            {
+                name: 'Alice Smith',
+                employeeId: 'EMP002',
+                email: 'alice.smith@school.com',
+                phone: '+1234567891',
+                subjects: ['English'],
+                joinDate: '2023-01-02',
+                class: 'Form 1B'
+            },
+            {
+                name: 'Bob Johnson',
+                employeeId: 'EMP003',
+                email: 'bob.johnson@school.com',
+                phone: '+1234567892',
+                subjects: ['History'],
+                joinDate: '2023-01-03',
+                class: 'Form 1A'
+            },
+            {
+                name: 'Carol White',
+                employeeId: 'EMP004',
+                email: 'carol.white@school.com',
+                phone: '+1234567893',
+                subjects: ['Biology'],
+                joinDate: '2023-01-04',
+                class: 'Form 1B'
+            }
+        ];
+
+        for (const teacher of testTeachers) {
+            await teacherTestService.createTeacher(teacher);
+        }
+
+        // Test default pagination (page 1, limit 10)
+        const defaultPagination = await teacherTestService.getTeachers({});
+        console.log('✅ Default pagination:', {
+            total: defaultPagination.total,
+            page: defaultPagination.page,
+            limit: defaultPagination.limit,
+            actualResults: defaultPagination.data.length
+        });
+
+        // Test custom page size
+        const customPageSize = await teacherTestService.getTeachers({ limit: 2 });
+        console.log('✅ Custom page size (limit=2):', {
+            total: customPageSize.total,
+            page: customPageSize.page,
+            limit: customPageSize.limit,
+            actualResults: customPageSize.data.length
+        });
+
+        // Test second page
+        const secondPage = await teacherTestService.getTeachers({ page: 2, limit: 2 });
+        console.log('✅ Second page (page=2, limit=2):', {
+            total: secondPage.total,
+            page: secondPage.page,
+            limit: secondPage.limit,
+            actualResults: secondPage.data.length
+        });
+
+        // Verify pagination with filters
+        const filteredPagination = await teacherTestService.getTeachers({
+            class: 'Form 1B',
+            limit: 1,
+            page: 1
+        });
+        console.log('✅ Filtered pagination (class="Form 1B", limit=1, page=1):', {
+            total: filteredPagination.total,
+            page: filteredPagination.page,
+            limit: filteredPagination.limit,
+            actualResults: filteredPagination.data.length
+        });
+
+        // Test empty page
+        const emptyPage = await teacherTestService.getTeachers({ page: 999, limit: 10 });
+        console.log('✅ Empty page (page=999):', {
+            total: emptyPage.total,
+            page: emptyPage.page,
+            limit: emptyPage.limit,
+            actualResults: emptyPage.data.length
+        });
+
+        await showTableContents();
+
+        // Test Case 9: Delete teacher and verify cascade
         await logTestStep('Testing delete cascade');
         if (createResult.data?.id) {
             await teacherTestService.deleteTeacher(createResult.data.id);
@@ -241,7 +330,7 @@ async function testTeacherService() {
             }
         }
 
-        // Test Case 9: Delete non-existent teacher
+        // Test Case 10: Delete non-existent teacher
         await logTestStep('Attempting to delete non-existent teacher');
         try {
             await teacherTestService.deleteTeacher('12345678-1234-1234-1234-123456789012');

@@ -5,7 +5,7 @@ import SearchAndFilterBar from './SearchAndFilterBar';
 import AddTeacherModal from './AddTeacherModal';
 import EditTeacherModal from './EditTeacherModal';
 import DeleteTeacherModal from './DeleteTeacherModal';
-import axios from 'axios';
+import { TeacherService } from '../../../../../services/teacher.service';
 
 const TeachersManagement = () => {
   const [teachers, setTeachers] = useState([]);
@@ -33,18 +33,16 @@ const TeachersManagement = () => {
   const loadTeachers = async () => {
     try {
       setLoading(true);
-      const response = await axios.get('/api/teachers', {
-        params: {
-          ...currentFilters,
-          page: pagination.current,
-          limit: pagination.pageSize
-        }
+      const result = await TeacherService.getTeachers({
+        ...currentFilters,
+        page: pagination.current,
+        limit: pagination.pageSize
       });
       
-      setTeachers(response.data.teachers);
+      setTeachers(result.data);
       setPagination(prev => ({
         ...prev,
-        total: response.data.pagination.total
+        total: result.total
       }));
     } catch (error) {
       message.error('Failed to load teachers');
