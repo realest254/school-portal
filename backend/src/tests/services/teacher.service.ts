@@ -7,15 +7,11 @@ import {
     ServiceError,
     createUUID,
     createEmail,
-    createPhoneNumber
+    createPhoneNumber,
+    createEmployeeId,
+    createTeacherName,
+    createJoinDate
 } from '../../types/common.types';
-import { 
-    Teacher, 
-    CreateTeacherData,
-    UpdateTeacherData,
-    TeacherNotFoundError,
-    DuplicateTeacherError,
-} from '../../services/teacher.service';
 import { z } from 'zod';
 import crypto from 'crypto';
 
@@ -34,6 +30,29 @@ const TeacherSchema = z.object({
     class: z.string().optional()
 });
 
+export type Teacher = z.infer<typeof TeacherSchema>;
+
+interface CreateTeacherData {
+    name: string;
+    email: string;
+    phone: string;
+    employeeId: string;
+    joinDate: string;
+    subjects?: string[];
+    class?: string;
+}
+
+interface UpdateTeacherData {
+    name?: string;
+    email?: string;
+    phone?: string;
+    employeeId?: string;
+    joinDate?: string;
+    subjects?: string[];
+    class?: string;
+    status?: 'active' | 'inactive';
+}
+
 interface TeacherFilters {
     status?: 'active' | 'inactive';
     search?: string;  // Will match against name, email, or employeeId
@@ -47,6 +66,25 @@ interface GetTeacherIdentifier {
     employeeId?: string;
     email?: string;
     name?: string;
+}
+
+// Error classes specific to the test service
+export class TeacherNotFoundError extends ServiceError {
+    constructor(identifier: string) {
+        super(`Teacher not found: ${identifier}`, 'TEACHER_NOT_FOUND', 404);
+    }
+}
+
+export class DuplicateTeacherError extends ServiceError {
+    constructor(field: string) {
+        super(`Teacher with this ${field} already exists`, 'DUPLICATE_TEACHER', 409);
+    }
+}
+
+export class SubjectNotFoundError extends ServiceError {
+    constructor(subjects: string[]) {
+        super(`The following subjects do not exist: ${subjects.join(', ')}`, 'SUBJECTS_NOT_FOUND', 400);
+    }
 }
 
 export class TeacherTestService {
@@ -86,10 +124,12 @@ export class TeacherTestService {
 
         const rows = await this.db.all(query, subjectNames);
         
-        if (rows.length !== subjectNames.length) {
-            const foundNames = rows.map((row: { name: string }) => row.name);
-            const notFound = subjectNames.filter(name => !foundNames.includes(name));
-            throw new ServiceError(`Some subjects not found: ${notFound.join(', ')}`, 'SUBJECTS_NOT_FOUND');
+        // Find which subjects don't exist
+        const foundNames = rows.map((row: { name: string }) => row.name);
+        const notFound = subjectNames.filter(name => !foundNames.includes(name));
+        
+        if (notFound.length > 0) {
+            throw new SubjectNotFoundError(notFound);
         }
 
         return rows.map((row: { id: string }) => row.id);
@@ -299,11 +339,27 @@ export class TeacherTestService {
             await this.db.run('BEGIN TRANSACTION');
 
             // Validate data
-            const validatedData = {
-                ...data,
-                email: createEmail(data.email),
-                phone: createPhoneNumber(data.phone),
-            };
+            let validatedData;
+            try {
+                validatedData = {
+                    ...data,
+                    name: createTeacherName(data.name),
+                    email: createEmail(data.email),
+                    phone: createPhoneNumber(data.phone),
+                    employeeId: createEmployeeId(data.employeeId),
+                    joinDate: createJoinDate(data.joinDate)
+                };
+            } catch (error: unknown) {
+                if (error && typeof error === 'object' && 'name' in error && error.name === 'ZodError' && 'errors' in error) {
+                    const zodError = error as z.ZodError;
+                    throw new ServiceError(
+                        zodError.issues[0].message,
+                        'VALIDATION_ERROR',
+                        400
+                    );
+                }
+                throw error;
+            }
 
             // Check for duplicates
             await this.checkTeacherDuplicates(validatedData.email, validatedData.employeeId);

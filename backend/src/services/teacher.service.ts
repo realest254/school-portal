@@ -1,17 +1,21 @@
+import { PoolClient } from 'pg';
+import SQL from 'sql-template-strings';
+import { z } from 'zod';
 import pool from '../config/database';
 import { logError, logInfo } from '../utils/logger';
-import SQL, { SQLStatement } from 'sql-template-strings';
-import { z } from 'zod';
 import { 
   ServiceError, 
-  ServiceResult, 
   PaginatedResult, 
+  ServiceResult, 
   UUID, 
   Email, 
   PhoneNumber,
   createUUID,
   createEmail,
-  createPhoneNumber
+  createPhoneNumber,
+  createTeacherName,
+  createEmployeeId,
+  createJoinDate
 } from '../types/common.types';
 
 // Teacher-specific error types
@@ -27,22 +31,24 @@ export class DuplicateTeacherError extends ServiceError {
   }
 }
 
+export class SubjectNotFoundError extends ServiceError {
+  constructor(subjects: string) {
+    super(subjects, 'SUBJECTS_NOT_FOUND', 400);
+  }
+}
+
 // Validation schemas
 const TeacherSchema = z.object({
-  id: z.string().uuid(),
   name: z.string().min(2).max(100),
-  employeeId: z.string().min(3).max(20),
   email: z.string().email(),
-  phone: z.string().regex(/^\+?[\d\s-()]{10,}$/),
-  subjects: z.array(z.string()),
-  joinDate: z.string().datetime(),
-  status: z.enum(['active', 'inactive']).default('active'),
-  createdAt: z.date(),
-  updatedAt: z.date(),
-  class: z.string().optional()
+  phone: z.string().regex(/^\+?[1-9]\d{1,14}$/),
+  employeeId: z.string().min(3).max(20),
+  subjects: z.array(z.string()).optional(),
+  class: z.string().optional(),
+  joinDate: z.coerce.date()
 });
 
-export type Teacher = z.infer<typeof TeacherSchema>;
+type TeacherInput = z.infer<typeof TeacherSchema>;
 
 interface TeacherFilters {
   status?: 'active' | 'inactive';
@@ -103,25 +109,29 @@ export class TeacherService {
     }
   }
 
-  private async getSubjectIdsByNames(client: any, subjectNames: string[]): Promise<string[]> {
-    const query = SQL`
-      SELECT id, name 
-      FROM subjects 
-      WHERE name = ANY(${subjectNames})
-    `;
-
-    const { rows } = await client.query(query);
-    
-    if (rows.length !== subjectNames.length) {
-      const foundNames = rows.map((row: { name: string }) => row.name);
-      const notFound = subjectNames.filter(name => !foundNames.includes(name));
-      throw new ServiceError(`Some subjects not found: ${notFound.join(', ')}`, 'SUBJECTS_NOT_FOUND');
+  private async getSubjectIdsByNames(
+    client: PoolClient,
+    subjectNames: string[]
+  ): Promise<number[]> {
+    if (!subjectNames || subjectNames.length === 0) {
+      return [];
     }
 
-    return rows.map((row: { id: string }) => row.id);
+    const result = await client.query(SQL`
+      SELECT id, name FROM subjects 
+      WHERE name = ANY(${subjectNames})
+    `);
+
+    if (result.rows.length !== subjectNames.length) {
+      const foundSubjects = new Set(result.rows.map((row: { name: string }) => row.name));
+      const missingSubjects = subjectNames.filter(name => !foundSubjects.has(name));
+      throw new SubjectNotFoundError(`Subjects not found: ${missingSubjects.join(', ')}`);
+    }
+
+    return result.rows.map((row: { id: number }) => row.id);
   }
 
-  private async getClassIdByName(client: any, className: string): Promise<string> {
+  private async getClassIdByName(client: PoolClient, className: string): Promise<string> {
     const query = SQL`
       SELECT id 
       FROM classes 
@@ -137,7 +147,7 @@ export class TeacherService {
     return rows[0].id;
   }
 
-  private async checkTeacherDuplicates(client: any, email: string, employeeId: string): Promise<void> {
+  private async checkTeacherDuplicates(client: PoolClient, email: string, employeeId: string): Promise<void> {
     // Check for duplicate email
     const { rows: emailCheck } = await client.query(SQL`
       SELECT email FROM teachers WHERE email = ${email}
@@ -155,7 +165,7 @@ export class TeacherService {
     }
   }
 
-  async getTeachers(filters: TeacherFilters = {}): Promise<PaginatedResult<Teacher[]>> {
+  async getTeachers(filters: TeacherFilters = {}): Promise<PaginatedResult<TeacherInput[]>> {
     try {
       this.validateFilters(filters);
 
@@ -227,7 +237,7 @@ export class TeacherService {
     }
   }
 
-  async getTeacherByIdentifier(identifier: GetTeacherIdentifier): Promise<ServiceResult<Teacher>> {
+  async getTeacherByIdentifier(identifier: GetTeacherIdentifier): Promise<ServiceResult<TeacherInput>> {
     try {
       if (!identifier.id && !identifier.employeeId && !identifier.email && !identifier.name) {
         throw new Error('At least one identifier (id, employeeId, email, or name) must be provided');
@@ -281,17 +291,26 @@ export class TeacherService {
     }
   }
 
-  async createTeacher(data: CreateTeacherData): Promise<ServiceResult<Teacher>> {
+  async createTeacher(data: CreateTeacherData): Promise<ServiceResult<TeacherInput>> {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
 
       // Validate data
-      const validatedData = {
-        ...data,
-        email: createEmail(data.email),
-        phone: createPhoneNumber(data.phone),
-      };
+      let validatedData;
+      try {
+        validatedData = TeacherSchema.parse(data);
+      } catch (error: unknown) {
+        if (error && typeof error === 'object' && 'name' in error && error.name === 'ZodError' && 'errors' in error) {
+          const zodError = error as z.ZodError;
+          throw new ServiceError(
+            zodError.issues[0].message,
+            'VALIDATION_ERROR',
+            400
+          );
+        }
+        throw error;
+      }
 
       // Check for duplicates
       await this.checkTeacherDuplicates(client, validatedData.email, validatedData.employeeId);
@@ -317,12 +336,14 @@ export class TeacherService {
       `);
 
       // 2. Link teacher to subjects
-      const subjectIds = await this.getSubjectIdsByNames(client, data.subjects);
-      for (const subjectId of subjectIds) {
-        await client.query(SQL`
-          INSERT INTO teacher_subjects (teacher_id, subject_id)
-          VALUES (${teacher.id}, ${subjectId})
-        `);
+      if (data.subjects && data.subjects.length > 0) {
+        const subjectIds = await this.getSubjectIdsByNames(client, data.subjects);
+        for (const subjectId of subjectIds) {
+          await client.query(SQL`
+            INSERT INTO teacher_subjects (teacher_id, subject_id)
+            VALUES (${teacher.id}, ${subjectId})
+          `);
+        }
       }
 
       // 3. If class provided, link teacher to class
@@ -345,7 +366,7 @@ export class TeacherService {
     }
   }
 
-  async updateTeacher(id: string, data: UpdateTeacherData): Promise<ServiceResult<Teacher>> {
+  async updateTeacher(id: string, data: UpdateTeacherData): Promise<ServiceResult<TeacherInput>> {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');

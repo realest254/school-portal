@@ -4,12 +4,22 @@ import { z } from 'zod';
 export type UUID = string & { readonly __brand: unique symbol };
 export type Email = string & { readonly __brand: unique symbol };
 export type PhoneNumber = string & { readonly __brand: unique symbol };
+export type EmployeeId = string & { readonly __brand: unique symbol };
+export type TeacherName = string & { readonly __brand: unique symbol };
+export type JoinDate = string & { readonly __brand: unique symbol };
 
 // Common validation schemas
 export const UUIDSchema = z.string().uuid();
 export const EmailSchema = z.string().email();
 export const PhoneSchema = z.string().regex(/^\+?[\d\s-()]{10,}$/);
-export const DateSchema = z.string().datetime();
+export const DateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((date) => {
+    const [year, month, day] = date.split('-').map(Number);
+    const d = new Date(year, month - 1, day);
+    return d.getFullYear() === year && d.getMonth() === month - 1 && d.getDate() === day;
+}, { message: "Invalid date. Format: YYYY-MM-DD" });
+export const EmployeeIdSchema = z.string().min(3).max(20);
+export const TeacherNameSchema = z.string().min(2).max(100);
+export const JoinDateSchema = DateSchema;
 
 // Type guards and converters
 export function isUUID(value: string): value is UUID {
@@ -34,6 +44,21 @@ export function createEmail(value: string): Email {
 export function createPhoneNumber(value: string): PhoneNumber {
   PhoneSchema.parse(value);
   return value as PhoneNumber;
+}
+
+export function createEmployeeId(value: string): EmployeeId {
+  EmployeeIdSchema.parse(value);
+  return value as EmployeeId;
+}
+
+export function createTeacherName(value: string): TeacherName {
+  TeacherNameSchema.parse(value);
+  return value as TeacherName;
+}
+
+export function createJoinDate(value: string): JoinDate {
+  JoinDateSchema.parse(value);
+  return value as JoinDate;
 }
 
 // Base error class
