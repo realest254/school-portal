@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 
-const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'your-fallback-encryption-key-min-32-chars!!';
+const ENCRYPTION_KEY = (process.env.ENCRYPTION_KEY || 'your-fallback-encryption-key-min-32-chars!!').padEnd(32).slice(0, 32);
 const IV_LENGTH = 16; // For AES, this is always 16
 const ALGORITHM = 'aes-256-cbc';
 

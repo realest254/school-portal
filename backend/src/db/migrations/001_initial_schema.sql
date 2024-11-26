@@ -105,11 +105,42 @@ CREATE TABLE IF NOT EXISTS invites (
     status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'cancelled')),
     token TEXT UNIQUE,
     expires_at TIMESTAMPTZ NOT NULL,
-    used_at TIMESTAMPTZ,
-    used_by UUID REFERENCES profiles(id),
+    accepted_at TIMESTAMPTZ,
+    accepted_by UUID REFERENCES profiles(id),
     created_at TIMESTAMPTZ DEFAULT now(),
-    updated_at TIMESTAMPTZ DEFAULT now()
+    updated_at TIMESTAMPTZ DEFAULT now(),
+    CONSTRAINT check_accepted_fields CHECK (
+        (status != 'accepted' AND accepted_at IS NULL AND accepted_by IS NULL) OR
+        (status = 'accepted' AND accepted_at IS NOT NULL AND accepted_by IS NOT NULL)
+    )
 );
+
+-- Add indexes for invites table
+CREATE INDEX IF NOT EXISTS idx_invites_email ON invites(email);
+CREATE INDEX IF NOT EXISTS idx_invites_token ON invites(token);
+CREATE INDEX IF NOT EXISTS idx_invites_status ON invites(status);
+CREATE INDEX IF NOT EXISTS idx_invites_status_expires ON invites(status, expires_at) WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS idx_invites_email_created ON invites(email, created_at DESC);
+
+-- Create updated_at trigger for invites
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+CREATE TRIGGER update_invites_updated_at
+    BEFORE UPDATE ON invites
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+-- Add table and column comments
+COMMENT ON TABLE invites IS 'Stores user invitations with improved tracking of usage and updates';
+COMMENT ON COLUMN invites.accepted_at IS 'Timestamp when the invite was accepted';
+COMMENT ON COLUMN invites.accepted_by IS 'ID of the user who accepted the invite';
+COMMENT ON COLUMN invites.updated_at IS 'Timestamp of the last update to this invite';
 
 -- Create indexes for better query performance
 CREATE INDEX IF NOT EXISTS idx_teacher_subjects_teacher_id ON teacher_subjects(teacher_id);
@@ -127,10 +158,5 @@ CREATE INDEX IF NOT EXISTS idx_students_status ON students(status);
 CREATE INDEX IF NOT EXISTS idx_classes_name ON classes(name);
 CREATE INDEX IF NOT EXISTS idx_classes_academic_year ON classes(academic_year);
 CREATE INDEX IF NOT EXISTS idx_subjects_name ON subjects(name);
-CREATE INDEX IF NOT EXISTS idx_invites_email ON invites(email);
-CREATE INDEX IF NOT EXISTS idx_invites_token ON invites(token);
-CREATE INDEX IF NOT EXISTS idx_invites_status ON invites(status);
 CREATE INDEX IF NOT EXISTS idx_profiles_role ON profiles(role);
 CREATE INDEX IF NOT EXISTS idx_profiles_email ON profiles(email);
-
-

@@ -120,7 +120,17 @@ export class InviteService {
 
       await client.query('BEGIN');
       
-      const expiration = data.expiration_date || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+      // Validate expiration date
+      let expiration: Date;
+      if (data.expiration_date) {
+        const date = new Date(data.expiration_date);
+        if (isNaN(date.getTime())) {
+          throw new InviteError('Invalid expiration date', 'INVALID_EXPIRATION_DATE', 400);
+        }
+        expiration = date;
+      } else {
+        expiration = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+      }
       
       // Create invite with row-level locking
       const result = await client.query(SQL`
@@ -353,41 +363,125 @@ export class InviteService {
 
   async checkInviteValidity(id: string): Promise<{ valid: boolean; message?: string }> {
     try {
-      const result = await this.db.query(SQL`
+      // Try cache first
+      const cached = await redisClient.get<Invite>(`invite:${id}`);
+      if (cached) {
+        const now = new Date();
+        const expiresAt = new Date(cached.expiration_date);
+        
+        if (cached.status !== InviteStatus.PENDING) {
+          return {
+            valid: false,
+            message: 'Invite is no longer valid'
+          };
+        }
+
+        if (expiresAt < now) {
+          return {
+            valid: false,
+            message: 'Invite has expired'
+          };
+        }
+
+        return { valid: true };
+      }
+
+      // If not in cache, check database
+      const result = await this.db.query<Invite>(SQL`
         SELECT * FROM invites 
         WHERE id = ${id} 
-        AND status = ${InviteStatus.PENDING} 
-        AND expiration_date > NOW()
+        AND status = ${InviteStatus.PENDING}
       `);
       
       if (result.rows.length === 0) {
         return {
           valid: false,
-          message: 'Invite is invalid or has expired'
+          message: 'Invite not found'
         };
       }
+
+      const invite = result.rows[0];
+      const now = new Date();
+      const expiresAt = new Date(invite.expiration_date);
+
+      if (expiresAt < now) {
+        return {
+          valid: false,
+          message: 'Invite has expired'
+        };
+      }
+
+      // Cache the valid invite
+      await redisClient.set(`invite:${id}`, invite, this.INVITE_CACHE_TTL);
       
       return { valid: true };
     } catch (error) {
       logger.error('Error checking invite validity:', error);
-      throw new InviteError(error instanceof Error ? error.message : 'Failed to check invite validity', 'CHECK_INVITE_VALIDITY_FAILED', 500);
+      throw new InviteError(
+        error instanceof Error ? error.message : 'Failed to check invite validity',
+        'CHECK_INVITE_VALIDITY_FAILED',
+        500
+      );
     }
   }
 
   async markInviteAsUsed(id: string, acceptedBy: string): Promise<void> {
+    const client = await this.db.connect();
     try {
-      await this.db.query(SQL`
+      await client.query('BEGIN');
+
+      // First check if invite exists and is valid
+      const checkResult = await client.query<Invite>(SQL`
+        SELECT * FROM invites 
+        WHERE id = ${id} 
+        AND status = ${InviteStatus.PENDING}
+        FOR UPDATE
+      `);
+
+      if (checkResult.rows.length === 0) {
+        throw new InviteError('Invite not found or already used', 'INVALID_INVITE_STATUS', 400);
+      }
+
+      const invite = checkResult.rows[0];
+      const now = new Date();
+      const expiresAt = new Date(invite.expiration_date);
+
+      if (expiresAt < now) {
+        throw new InviteError('Invite has expired', 'INVITE_EXPIRED', 400);
+      }
+
+      // Update the invite
+      await client.query(SQL`
         UPDATE invites 
-        SET status = ${InviteStatus.ACCEPTED}, 
+        SET status = ${InviteStatus.ACCEPTED},
             accepted_at = NOW(),
-            accepted_by = ${acceptedBy}
+            accepted_by = ${acceptedBy},
+            updated_at = NOW()
         WHERE id = ${id}
         AND status = ${InviteStatus.PENDING}
         AND expiration_date > NOW()
       `);
+
+      // Invalidate cache
+      await redisClient.del(`invite:${id}`);
+
+      // Log the successful acceptance
+      logInviteAccepted(acceptedBy, invite.role, id, invite.email);
+
+      await client.query('COMMIT');
     } catch (error) {
+      await client.query('ROLLBACK');
+      if (error instanceof InviteError) {
+        throw error;
+      }
       logger.error('Error marking invite as used:', error);
-      throw new InviteError(error instanceof Error ? error.message : 'Failed to mark invite as used', 'MARK_INVITE_AS_USED_FAILED', 500);
+      throw new InviteError(
+        error instanceof Error ? error.message : 'Failed to mark invite as used',
+        'MARK_INVITE_AS_USED_FAILED',
+        500
+      );
+    } finally {
+      client.release();
     }
   }
 
@@ -554,210 +648,6 @@ export class InviteService {
     }
   }
 
-  async resendInvite(email: string, invited_by: string, ip?: string): Promise<InviteResult> {
-    const client = await this.db.connect();
-    try {
-      await client.query('BEGIN');
-      
-      // Check rate limits
-      await RateLimiter.checkIpLimit(ip || 'unknown');
-      await RateLimiter.checkEmailLimit(email);
-      
-      // Get the existing invite with row-level locking
-      const existingInvite = await client.query(SQL`
-        SELECT * FROM invites 
-        WHERE email = ${email} 
-        AND status = ${InviteStatus.PENDING}
-        ORDER BY created_at DESC 
-        LIMIT 1
-        FOR UPDATE
-      `);
-      
-      if (existingInvite.rows.length === 0) {
-        throw new InviteError('No pending invite found for this email', 'NO_PENDING_INVITE', 404);
-      }
-
-      const invite = existingInvite.rows[0];
-
-      // Check for spam
-      const spamCheck = await this.checkInviteSpam(email);
-      if (spamCheck.isSpam) {
-        throw new InviteError(spamCheck.message || 'Too many invite attempts', 'SPAM_DETECTED', 429);
-      }
-
-      const expiration_date = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-      
-      // Update the invite with new expiration date
-      const result = await client.query(SQL`
-        UPDATE invites 
-        SET expiration_date = ${expiration_date},
-            invited_by = ${invited_by},
-            updated_at = NOW()
-        WHERE id = ${invite.id}
-        AND status = ${InviteStatus.PENDING}
-        RETURNING *
-      `);
-
-      const updatedInvite = result.rows[0];
-
-      // Generate new token with expiry
-      const token = this.generateToken({
-        id: updatedInvite.id,
-        email: updatedInvite.email,
-        role: updatedInvite.role
-      });
-
-      // Resend invite email with retry logic
-      const emailResult = await this.sendInviteEmail(updatedInvite, token);
-      if (!emailResult.success) {
-        const errorMessage = emailResult.error || 'Failed to resend invite email';
-        throw new InviteError(errorMessage, 'SEND_INVITE_EMAIL_FAILED', 500);
-      }
-
-      // Update cache
-      await redisClient.set(`invite:${updatedInvite.id}`, updatedInvite, this.INVITE_CACHE_TTL);
-      
-      await client.query('COMMIT');
-
-      // Log the successful invite resend
-      logInviteCreated(invited_by, updatedInvite.role, updatedInvite.id, email, updatedInvite.role, ip);
-      
-      return {
-        success: true,
-        invite: updatedInvite
-      };
-    } catch (error) {
-      await client.query('ROLLBACK');
-      
-      const finalError = error instanceof InviteError 
-        ? error 
-        : new InviteError(
-            error instanceof Error ? error.message : 'Failed to resend invite',
-            'RESEND_INVITE_FAILED',
-            500
-          );
-
-      logInviteError(
-        'INVITE_RESEND_FAILED',
-        invited_by,
-        UserRole.ADMIN,
-        finalError,
-        { email },
-        ip
-      );
-
-      throw finalError;
-    } finally {
-      client.release();
-    }
-  }
-
-  async cancelInvite(id: string, cancelled_by: string, ip?: string): Promise<InviteResult> {
-    const client = await this.db.connect();
-    try {
-      await client.query('BEGIN');
-
-      // Get invite with row-level locking
-      const invite = await client.query(SQL`
-        SELECT * FROM invites 
-        WHERE id = ${id} 
-        AND status = ${InviteStatus.PENDING}
-        FOR UPDATE
-      `);
-
-      if (!invite.rows[0]) {
-        throw new InviteError('Invite not found or already processed', 'INVITE_NOT_FOUND', 404);
-      }
-
-      // Update invite status
-      const result = await client.query(SQL`
-        UPDATE invites 
-        SET status = ${InviteStatus.EXPIRED},
-            updated_at = NOW()
-        WHERE id = ${id}
-        AND status = ${InviteStatus.PENDING}
-        RETURNING *
-      `);
-
-      const cancelledInvite = result.rows[0];
-
-      // Invalidate cache
-      await redisClient.del(`invite:${id}`);
-
-      await client.query('COMMIT');
-
-      // Log the cancellation
-      logInviteCancelled(cancelled_by, UserRole.ADMIN, id, ip);
-
-      return {
-        success: true,
-        invite: cancelledInvite
-      };
-    } catch (error) {
-      await client.query('ROLLBACK');
-
-      const finalError = error instanceof InviteError 
-        ? error 
-        : new InviteError(
-            error instanceof Error ? error.message : 'Failed to cancel invite',
-            'CANCEL_INVITE_FAILED',
-            500
-          );
-
-      logInviteError(
-        'INVITE_CANCELLATION_FAILED',
-        cancelled_by,
-        UserRole.ADMIN,
-        finalError,
-        { inviteId: id },
-        ip
-      );
-
-      throw finalError;
-    } finally {
-      client.release();
-    }
-  }
-
-  async cleanupExpiredInvites(): Promise<void> {
-    const client = await this.db.connect();
-    try {
-      await client.query('BEGIN');
-
-      // Get expired invites
-      const expiredInvites = await client.query(SQL`
-        SELECT id FROM invites
-        WHERE status = ${InviteStatus.PENDING}
-        AND expiration_date < NOW()
-        FOR UPDATE
-      `);
-
-      if (expiredInvites.rows.length > 0) {
-        // Update status in batch
-        await client.query(SQL`
-          UPDATE invites
-          SET status = ${InviteStatus.EXPIRED},
-              updated_at = NOW()
-          WHERE id = ANY(${expiredInvites.rows.map(row => row.id)})
-        `);
-
-        // Clear cache for expired invites
-        for (const row of expiredInvites.rows) {
-          await redisClient.del(`invite:${row.id}`);
-        }
-
-        logger.info(`Cleaned up ${expiredInvites.rows.length} expired invites`);
-      }
-
-      await client.query('COMMIT');
-    } catch (error) {
-      await client.query('ROLLBACK');
-      logger.error('Failed to cleanup expired invites:', error);
-      throw new InviteError(error instanceof Error ? error.message : 'Failed to cleanup expired invites', 'CLEANUP_EXPIRED_INVITES_FAILED', 500);
-    } finally {
-      client.release();
-    }
-  }
 }
 
 export const inviteService = InviteService.getInstance();

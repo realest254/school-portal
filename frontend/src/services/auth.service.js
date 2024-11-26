@@ -15,7 +15,7 @@ const SECURITY_CONSTANTS = {
 class AuthService {
   constructor() {
     this.supabase = supabase;
-    this.apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:3000/api'; // Update with your backend API URL
+    this.apiUrl = `${import.meta.env.VITE_API_URL}/invites`;
   }
 
   /**
@@ -51,30 +51,35 @@ class AuthService {
   }
 
   /**
-   * Check invite token validity
-   * @param {string} token - Encrypted invite token
-   * @returns {Promise<Object>} Validation result
+   * Create a new invite
+   * @param {string} email - Email to invite
+   * @param {string} role - Role to assign to the invite
+   * @returns {Promise<Object>} Created invite details
    */
-  async checkInviteToken(token) {
-    try {
-      const response = await axios.post(`${this.apiUrl}/invites/decrypt-token`, { token });
-      const { valid, data, message } = response.data;
-      
-      if (!valid) {
-        return {
-          valid: false,
-          reason: message
-        };
-      }
+  async createInvite(email, role) {
+    const response = await axios.post(this.apiUrl, { email, role });
+    return response.data;
+  }
 
-      return {
-        valid: true,
-        invite: data
-      };
-    } catch (error) {
-      console.error('Error decrypting token:', error);
-      throw new Error(error.response?.data?.error || error.message);
-    }
+  /**
+   * Create multiple invites at once
+   * @param {string[]} emails - Emails to invite
+   * @param {string} role - Role to assign to the invites
+   * @returns {Promise<Object>} Created invites details
+   */
+  async createBulkInvites(emails, role) {
+    const response = await axios.post(`${this.apiUrl}/bulk`, { emails, role });
+    return response.data;
+  }
+
+  /**
+   * Validate and decrypt invite token
+   * @param {string} token - Encrypted token from invite URL
+   * @returns {Promise<Object>} Validation result with invite details
+   */
+  async validateToken(token) {
+    const response = await axios.post(`${this.apiUrl}/decrypt-token`, { token });
+    return response.data;
   }
 
   /**
@@ -88,14 +93,14 @@ class AuthService {
   async acceptInvite(email, password, inviteId, role) {
     try {
       // First accept the invite in our backend
-      const acceptResponse = await axios.post(`${this.apiUrl}/invites/accept`, {
-        inviteId,
-        email,
-        role
+      const response = await axios.post(`${this.apiUrl}/accept`, { 
+        inviteId, 
+        email, 
+        role 
       });
 
-      if (!acceptResponse.data.success) {
-        throw new Error(acceptResponse.data.message || 'Failed to accept invite');
+      if (!response.data.success) {
+        throw new Error(response.data.message || 'Failed to accept invite');
       }
 
       // Then sign up user with Supabase without auto sign in
@@ -120,8 +125,18 @@ class AuthService {
       };
     } catch (error) {
       console.error('Error accepting invite:', error);
-      throw new Error(error.response?.data?.error || error.message);
+      throw new Error(error.message || 'Failed to create account');
     }
+  }
+
+  /**
+   * Get invite history for an email
+   * @param {string} email - Email to get invite history for
+   * @returns {Promise<Object>} Invite history
+   */
+  async getInviteHistory(email) {
+    const response = await axios.get(`${this.apiUrl}/history`, { params: { email } });
+    return response.data;
   }
 }
 

@@ -26,15 +26,15 @@ export function SignUpForm() {
           return
         }
 
-        const { valid, reason, invite } = await inviteService.validateToken(token)
+        const result = await inviteService.validateToken(token)
         
-        if (!valid) {
-          setError(getErrorMessage(reason))
+        if (!result.valid) {
+          setError(getErrorMessage(result.reason))
           return
         }
 
-        setInviteDetails(invite)
-        setFormData(prev => ({ ...prev, email: invite.email }))
+        setInviteDetails(result.invite)
+        setFormData(prev => ({ ...prev, email: result.invite.email }))
       } catch (err) {
         setError('Invalid or expired invite link.')
       }

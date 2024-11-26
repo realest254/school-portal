@@ -23,8 +23,9 @@ export const InviteSchema = z.object({
   expiration_date: z.date(),
   created_at: z.date(),
   updated_at: z.date(),
-  accepted_at: z.date().nullable(),
-  accepted_by: z.string().uuid().nullable()
+  used_at: z.date().nullable(),
+  used_by: z.string().uuid().nullable(),
+  token: z.string().nullable()
 });
 
 export const CreateInviteSchema = z.object({
