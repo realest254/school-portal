@@ -1,6 +1,7 @@
 import { PoolClient } from 'pg';
 import SQL from 'sql-template-strings';
 import { z } from 'zod';
+import { v4 as uuidv4 } from 'uuid';
 import pool from '../config/database';
 import { logError, logInfo } from '../utils/logger';
 import { 
@@ -147,21 +148,44 @@ export class TeacherService {
     return rows[0].id;
   }
 
-  private async checkTeacherDuplicates(client: PoolClient, email: string, employeeId: string): Promise<void> {
-    // Check for duplicate email
-    const { rows: emailCheck } = await client.query(SQL`
-      SELECT email FROM teachers WHERE email = ${email}
-    `);
-    if (emailCheck.length > 0) {
-      throw new DuplicateTeacherError('email');
+  private async checkTeacherDuplicates(
+    client: any, 
+    email: string | undefined, 
+    employeeId: string | undefined, 
+    currentId?: string,
+    isCreate: boolean = false
+  ): Promise<void> {
+    // For create operations, both email and employeeId are required
+    if (isCreate && (!email || !employeeId)) {
+      throw new ServiceError(
+        'Email and employee ID are required for new teachers',
+        'MISSING_REQUIRED_FIELDS',
+        400
+      );
     }
 
-    // Check for duplicate employee ID
-    const { rows: employeeIdCheck } = await client.query(SQL`
-      SELECT employee_id FROM teachers WHERE employee_id = ${employeeId}
-    `);
-    if (employeeIdCheck.length > 0) {
-      throw new DuplicateTeacherError('employee ID');
+    if (email) {
+      // Check for duplicate email
+      const emailQuery = currentId 
+        ? SQL`SELECT email FROM teachers WHERE email = ${email} AND id != ${currentId}`
+        : SQL`SELECT email FROM teachers WHERE email = ${email}`;
+        
+      const { rows: emailCheck } = await client.query(emailQuery);
+      if (emailCheck.length > 0) {
+        throw new DuplicateTeacherError('email');
+      }
+    }
+
+    if (employeeId) {
+      // Check for duplicate employee ID
+      const employeeIdQuery = currentId
+        ? SQL`SELECT employee_id FROM teachers WHERE employee_id = ${employeeId} AND id != ${currentId}`
+        : SQL`SELECT employee_id FROM teachers WHERE employee_id = ${employeeId}`;
+        
+      const { rows: employeeIdCheck } = await client.query(employeeIdQuery);
+      if (employeeIdCheck.length > 0) {
+        throw new DuplicateTeacherError('employee ID');
+      }
     }
   }
 
@@ -299,7 +323,14 @@ export class TeacherService {
       // Validate data
       let validatedData;
       try {
-        validatedData = TeacherSchema.parse(data);
+        validatedData = {
+          ...data,
+          name: createTeacherName(data.name),
+          email: createEmail(data.email),
+          phone: createPhoneNumber(data.phone),
+          employeeId: createEmployeeId(data.employeeId),
+          joinDate: createJoinDate(data.joinDate)
+        };
       } catch (error: unknown) {
         if (error && typeof error === 'object' && 'name' in error && error.name === 'ZodError' && 'errors' in error) {
           const zodError = error as z.ZodError;
@@ -313,24 +344,45 @@ export class TeacherService {
       }
 
       // Check for duplicates
-      await this.checkTeacherDuplicates(client, validatedData.email, validatedData.employeeId);
+      await this.checkTeacherDuplicates(client, validatedData.email, validatedData.employeeId, undefined, true);
+
+      // Validate subjects (no duplicates)
+      if (data.subjects) {
+        const uniqueSubjects = [...new Set(data.subjects)];
+        if (uniqueSubjects.length !== data.subjects.length) {
+          throw new ServiceError(
+            'Duplicate subjects are not allowed',
+            'DUPLICATE_SUBJECTS',
+            400
+          );
+        }
+        data.subjects = uniqueSubjects;
+      }
+
+      const id = createUUID(uuidv4());
 
       // 1. Create teacher record
       const { rows: [teacher] } = await client.query(SQL`
         INSERT INTO teachers (
+          id,
           name,
           email,
           phone,
           employee_id,
           join_date,
-          status
+          status,
+          created_at,
+          updated_at
         ) VALUES (
+          ${id},
           ${validatedData.name},
           ${validatedData.email},
           ${validatedData.phone},
           ${validatedData.employeeId},
           ${validatedData.joinDate},
-          'active'
+          'active',
+          NOW(),
+          NOW()
         )
         RETURNING *
       `);
@@ -360,6 +412,8 @@ export class TeacherService {
       return await this.getTeacherByIdentifier({ id: teacher.id });
     } catch (error) {
       await client.query('ROLLBACK');
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      logError('Error creating teacher:', errorMessage);
       throw error;
     } finally {
       client.release();
@@ -371,54 +425,96 @@ export class TeacherService {
     try {
       await client.query('BEGIN');
 
-      // Check if teacher exists
-      await this.getTeacherByIdentifier({ id });
+      // First get the current teacher data
+      const { rows: [currentTeacher] } = await client.query(SQL`
+        SELECT * FROM teachers WHERE id = ${id}
+      `);
+
+      if (!currentTeacher) {
+        throw new TeacherNotFoundError(id);
+      }
+
+      // Validate data with proper type validation
+      const validatedData = {
+        ...data,
+        email: data.email ? createEmail(data.email) : undefined,
+        phone: data.phone ? createPhoneNumber(data.phone) : undefined,
+      };
+
+      // Only check for duplicates if the value is different from current
+      if ((validatedData.email && validatedData.email !== currentTeacher.email) || 
+          (data.employeeId && data.employeeId !== currentTeacher.employee_id)) {
+        await this.checkTeacherDuplicates(
+          client,
+          validatedData.email !== currentTeacher.email ? validatedData.email : undefined,
+          data.employeeId !== currentTeacher.employee_id ? data.employeeId : undefined,
+          id
+        );
+      }
 
       // 1. Update basic teacher info
-      const updateParts: string[] = [];
-      const updateValues: any[] = [id];
-      let paramCount = 2;
+      if (Object.keys(validatedData).length > 0 || data.status) {
+        const updateParts: string[] = [];
+        const updateValues: any[] = [id];
+        let paramCount = 2;
 
-      if (data.name) {
-        updateParts.push(`name = $${paramCount}`);
-        updateValues.push(data.name);
-        paramCount++;
-      }
-      if (data.email) {
-        updateParts.push(`email = $${paramCount}`);
-        updateValues.push(createEmail(data.email));
-        paramCount++;
-      }
-      if (data.phone) {
-        updateParts.push(`phone = $${paramCount}`);
-        updateValues.push(createPhoneNumber(data.phone));
-        paramCount++;
-      }
-      if (data.employeeId) {
-        updateParts.push(`employee_id = $${paramCount}`);
-        updateValues.push(data.employeeId);
-        paramCount++;
-      }
-      if (data.joinDate) {
-        updateParts.push(`join_date = $${paramCount}`);
-        updateValues.push(data.joinDate);
-        paramCount++;
-      }
-      if (data.status) {
-        updateParts.push(`status = $${paramCount}`);
-        updateValues.push(data.status);
-        paramCount++;
-      }
+        if (validatedData.name) {
+          updateParts.push(`name = $${paramCount}`);
+          updateValues.push(validatedData.name);
+          paramCount++;
+        }
+        if (validatedData.email) {
+          updateParts.push(`email = $${paramCount}`);
+          updateValues.push(validatedData.email);
+          paramCount++;
+        }
+        if (validatedData.phone) {
+          updateParts.push(`phone = $${paramCount}`);
+          updateValues.push(validatedData.phone);
+          paramCount++;
+        }
+        if (validatedData.employeeId) {
+          updateParts.push(`employee_id = $${paramCount}`);
+          updateValues.push(validatedData.employeeId);
+          paramCount++;
+        }
+        if (validatedData.joinDate) {
+          updateParts.push(`join_date = $${paramCount}`);
+          updateValues.push(validatedData.joinDate);
+          paramCount++;
+        }
+        if (data.status) {
+          updateParts.push(`status = $${paramCount}`);
+          updateValues.push(data.status);
+          paramCount++;
+        }
 
-      if (updateParts.length > 0) {
-        await client.query(
-          `UPDATE teachers SET ${updateParts.join(', ')} WHERE id = $1`,
-          updateValues
-        );
+        updateParts.push(`updated_at = NOW()`);
+
+        if (updateParts.length > 0) {
+          const updateQuery = `
+            UPDATE teachers 
+            SET ${updateParts.join(', ')}
+            WHERE id = $1
+            RETURNING *
+          `;
+          await client.query(updateQuery, updateValues);
+        }
       }
 
       // 2. Update subjects if provided
       if (data.subjects) {
+        // Validate subjects (no duplicates)
+        const uniqueSubjects = [...new Set(data.subjects)];
+        if (uniqueSubjects.length !== data.subjects.length) {
+          throw new ServiceError(
+            'Duplicate subjects are not allowed',
+            'DUPLICATE_SUBJECTS',
+            400
+          );
+        }
+        data.subjects = uniqueSubjects;
+
         // Remove existing subject relationships
         await client.query(SQL`
           DELETE FROM teacher_subjects
@@ -436,19 +532,21 @@ export class TeacherService {
       }
 
       // 3. Update class if provided
-      if (data.class) {
+      if (data.class !== undefined) {
         // Remove existing class relationship
         await client.query(SQL`
           DELETE FROM class_teachers
           WHERE teacher_id = ${id}
         `);
 
-        // Add new class relationship
-        const classId = await this.getClassIdByName(client, data.class);
-        await client.query(SQL`
-          INSERT INTO class_teachers (teacher_id, class_id, is_primary)
-          VALUES (${id}, ${classId}, true)
-        `);
+        // Add new class relationship if class is provided (not null)
+        if (data.class) {
+          const classId = await this.getClassIdByName(client, data.class);
+          await client.query(SQL`
+            INSERT INTO class_teachers (teacher_id, class_id, is_primary)
+            VALUES (${id}, ${classId}, true)
+          `);
+        }
       }
 
       await client.query('COMMIT');

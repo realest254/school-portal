@@ -2,6 +2,7 @@ import pool from '../config/database';
 import { logError, logInfo } from '../utils/logger';
 import SQL from 'sql-template-strings';
 import { z } from 'zod';
+import { v4 as uuidv4 } from 'uuid';
 import {
   UUID,
   Email,
@@ -32,11 +33,14 @@ export class DuplicateStudentError extends ServiceError {
 const StudentSchema = z.object({
   id: z.string().uuid(),
   name: z.string().min(2).max(100),
-  studentId: z.string().min(3).max(20),
+  studentId: z.string().regex(/^(STU|PAG)\d{3,}$/, 'Student ID must start with STU or PAG followed by numbers'),
   email: z.string().email(),
   class: z.string(),
-  parentPhone: z.string().regex(/^\+?[\d\s-()]{10,}$/),
-  dob: z.string().datetime(),
+  parentPhone: z.string().regex(/^\+\d{10,}$/, 'Phone number must be in international format (+1234567890)'),
+  dob: z.string().refine((val) => {
+    const date = new Date(val);
+    return !isNaN(date.getTime()) && date < new Date();
+  }, 'Invalid date of birth'),
   status: z.enum(['active', 'inactive']).default('active'),
   createdAt: z.date(),
   updatedAt: z.date()
@@ -44,10 +48,18 @@ const StudentSchema = z.object({
 
 export type Student = z.infer<typeof StudentSchema>;
 
-interface StudentFilters extends PaginationParams {
+export interface StudentFilters {
   status?: 'active' | 'inactive';
   class?: string;
   search?: string;
+  page?: number;
+  limit?: number;
+}
+
+interface GetStudentIdentifier {
+  id?: string;
+  studentId?: string;
+  email?: string;
 }
 
 interface CreateStudentData {
@@ -103,6 +115,7 @@ export class StudentService {
       SELECT id 
       FROM classes 
       WHERE name = ${className}
+      AND is_active = true
     `;
 
     const { rows } = await client.query(query);
@@ -119,13 +132,13 @@ export class StudentService {
       StudentService.validateFilters(filters);
 
       const query = SQL`
-        SELECT 
+        SELECT DISTINCT
           s.*,
           c.name as class_name
         FROM students s
         LEFT JOIN class_students cs ON s.id = cs.student_id
         LEFT JOIN classes c ON cs.class_id = c.id
-        WHERE 1=1
+        WHERE TRUE
       `;
 
       if (filters.status) {
@@ -134,9 +147,9 @@ export class StudentService {
 
       if (filters.search) {
         query.append(SQL` AND (
-          s.name ILIKE ${`%${filters.search}%`} OR
-          s.email ILIKE ${`%${filters.search}%`} OR
-          s.student_id ILIKE ${`%${filters.search}%`}
+          LOWER(s.name) LIKE LOWER(${`%${filters.search}%`}) OR
+          LOWER(s.email) LIKE LOWER(${`%${filters.search}%`}) OR
+          LOWER(s.admission_number) LIKE LOWER(${`%${filters.search}%`})
         )`);
       }
 
@@ -144,11 +157,33 @@ export class StudentService {
         query.append(SQL` AND c.name = ${filters.class}`);
       }
 
-      // Add ordering
-      query.append(SQL` ORDER BY s.name`);
+      // Add ordering with NULLS LAST for consistency
+      query.append(SQL` ORDER BY s.name NULLS LAST`);
 
       // Get total count
-      const countQuery = SQL`SELECT COUNT(*) as count FROM (${query}) as subquery`;
+      const countQuery = SQL`
+        SELECT COUNT(DISTINCT s.id) as count 
+        FROM students s
+        LEFT JOIN class_students cs ON s.id = cs.student_id
+        LEFT JOIN classes c ON cs.class_id = c.id
+        WHERE TRUE
+      `;
+
+      // Apply the same filters to count query
+      if (filters.status) {
+        countQuery.append(SQL` AND s.status = ${filters.status}`);
+      }
+      if (filters.search) {
+        countQuery.append(SQL` AND (
+          LOWER(s.name) LIKE LOWER(${`%${filters.search}%`}) OR
+          LOWER(s.email) LIKE LOWER(${`%${filters.search}%`}) OR
+          LOWER(s.admission_number) LIKE LOWER(${`%${filters.search}%`})
+        )`);
+      }
+      if (filters.class) {
+        countQuery.append(SQL` AND c.name = ${filters.class}`);
+      }
+
       const { rows: [{ count }] } = await pool.query(countQuery);
 
       // Add pagination
@@ -158,10 +193,6 @@ export class StudentService {
       query.append(SQL` LIMIT ${limit} OFFSET ${offset}`);
 
       const { rows } = await pool.query(query);
-
-      if (rows.length === 0 && filters.class) {
-        throw new ServiceError(`No students found in class: ${filters.class}`, 'NO_STUDENTS_FOUND', 404);
-      }
 
       const students = rows.map(row => ({
         ...row,
@@ -182,7 +213,7 @@ export class StudentService {
     }
   }
 
-  async getStudentByIdentifier(identifier: { id?: string; studentId?: string; email?: string }): Promise<ServiceResult<Student>> {
+  async getStudentByIdentifier(identifier: GetStudentIdentifier): Promise<ServiceResult<Student>> {
     try {
       const query = SQL`
         SELECT 
@@ -229,21 +260,44 @@ export class StudentService {
     }
   }
 
-  private async checkStudentDuplicates(client: any, email: string, studentId: string): Promise<void> {
-    // Check for duplicate email
-    const { rows: emailCheck } = await client.query(SQL`
-      SELECT email FROM students WHERE email = ${email}
-    `);
-    if (emailCheck.length > 0) {
-      throw new DuplicateStudentError('email');
+  private async checkStudentDuplicates(
+    client: any, 
+    email: string | undefined, 
+    studentId: string | undefined, 
+    currentId?: string,
+    isCreate: boolean = false
+  ): Promise<void> {
+    // For create operations, both email and studentId are required
+    if (isCreate && (!email || !studentId)) {
+      throw new ServiceError(
+        'Email and student ID are required for new students',
+        'MISSING_REQUIRED_FIELDS',
+        400
+      );
     }
 
-    // Check for duplicate student ID
-    const { rows: studentIdCheck } = await client.query(SQL`
-      SELECT student_id FROM students WHERE student_id = ${studentId}
-    `);
-    if (studentIdCheck.length > 0) {
-      throw new DuplicateStudentError('student ID');
+    if (email) {
+      // Check for duplicate email
+      const emailQuery = currentId 
+        ? SQL`SELECT email FROM students WHERE email = ${email} AND id != ${currentId}`
+        : SQL`SELECT email FROM students WHERE email = ${email}`;
+        
+      const { rows: emailCheck } = await client.query(emailQuery);
+      if (emailCheck.length > 0) {
+        throw new DuplicateStudentError('email');
+      }
+    }
+
+    if (studentId) {
+      // Check for duplicate student ID
+      const studentIdQuery = currentId
+        ? SQL`SELECT student_id FROM students WHERE student_id = ${studentId} AND id != ${currentId}`
+        : SQL`SELECT student_id FROM students WHERE student_id = ${studentId}`;
+        
+      const { rows: studentIdCheck } = await client.query(studentIdQuery);
+      if (studentIdCheck.length > 0) {
+        throw new DuplicateStudentError('student ID');
+      }
     }
   }
 
@@ -252,61 +306,89 @@ export class StudentService {
     try {
       await client.query('BEGIN');
 
+      // Validate data with proper type validation
+      const validatedData = {
+        ...data,
+        email: createEmail(data.email),
+        parentPhone: createPhoneNumber(data.parentPhone),
+      };
+
+      // Validate student ID format
+      if (!validatedData.studentId.match(/^(STU|PAG)\d{3,}$/)) {
+        throw new ServiceError(
+          'Student ID must start with STU or PAG followed by numbers',
+          'INVALID_STUDENT_ID',
+          400
+        );
+      }
+
+      // Validate date of birth
+      const dob = new Date(validatedData.dob);
+      if (isNaN(dob.getTime()) || dob >= new Date()) {
+        throw new ServiceError(
+          'Invalid date of birth',
+          'INVALID_DOB',
+          400
+        );
+      }
+
       // Check for duplicates
-      await this.checkStudentDuplicates(client, data.email, data.studentId);
+      await this.checkStudentDuplicates(client, validatedData.email, data.studentId, undefined, true);
 
       // Get class ID
       const classId = await this.getClassIdByName(client, data.class);
 
-      // Validate data schema
-      const CreateStudentSchema = z.object({
-        name: z.string().min(2).max(100),
-        studentId: z.string().min(3).max(20),
-        email: z.string().email(),
-        class: z.string(),
-        parentPhone: z.string().regex(/^\+?[\d\s-()]{10,}$/),
-        dob: z.string().datetime()
-      });
+      // Generate UUID for consistent ID generation across databases
+      const newId = createUUID(uuidv4());
 
-      CreateStudentSchema.parse(data);
-
-      // 1. Create student record
+      // Create student record
       const { rows: [student] } = await client.query(SQL`
         INSERT INTO students (
-          name, student_id, email, parent_phone, dob, status
+          id, 
+          admission_number, 
+          name, 
+          email, 
+          parent_phone,
+          dob,
+          status,
+          created_at, 
+          updated_at
         ) VALUES (
-          ${data.name}, ${data.studentId}, ${data.email}, 
-          ${data.parentPhone}, ${data.dob}, 'active'
+          ${newId},
+          ${data.studentId},
+          ${data.name},
+          ${validatedData.email},
+          ${validatedData.parentPhone},
+          ${data.dob},
+          'active',
+          CURRENT_TIMESTAMP,
+          CURRENT_TIMESTAMP
         )
-        RETURNING id
+        RETURNING *
       `);
 
-      // 2. Link student to class
+      // Link student to class
       await client.query(SQL`
-        INSERT INTO class_students (student_id, class_id)
-        VALUES (${student.id}, ${classId})
+        INSERT INTO class_students (student_id, class_id, created_at)
+        VALUES (${newId}, ${classId}, CURRENT_TIMESTAMP)
       `);
 
       await client.query('COMMIT');
 
-      logInfo(`Created student: ${student.id}`);
-      return await this.getStudentByIdentifier({ id: student.id });
+      // Fetch complete student data with class information
+      const result = await this.getStudentByIdentifier({ id: newId });
+      logInfo(`Created student: ${newId}`);
+      return result;
+
     } catch (error: unknown) {
       await client.query('ROLLBACK');
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
       logError('Error creating student:', errorMessage);
       
-      if (error instanceof DuplicateStudentError) {
+      if (error instanceof DuplicateStudentError || error instanceof ServiceError) {
         throw error;
       }
-      if (error instanceof z.ZodError) {
-        throw new ServiceError('Invalid student data', 'INVALID_STUDENT_DATA', 400);
-      }
-      throw new ServiceError(
-        'Failed to create student',
-        'CREATE_STUDENT_FAILED',
-        500
-      );
+      throw new ServiceError('Failed to create student', 'CREATE_ERROR');
     } finally {
       client.release();
     }
@@ -317,61 +399,82 @@ export class StudentService {
     try {
       await client.query('BEGIN');
 
-      // Check if student exists
-      await this.getStudentByIdentifier({ id });
+      // First get the current student data
+      const { rows: [currentStudent] } = await client.query(SQL`
+        SELECT * FROM students WHERE id = ${id}
+      `);
 
-      // Validate update data
-      const UpdateStudentSchema = z.object({
-        name: z.string().min(2).max(100).optional(),
-        studentId: z.string().min(3).max(20).optional(),
-        email: z.string().email().optional(),
-        class: z.string().optional(),
-        parentPhone: z.string().regex(/^\+?[\d\s-()]{10,}$/).optional(),
-        dob: z.string().datetime().optional(),
-        status: z.enum(['active', 'inactive']).optional()
-      });
-
-      UpdateStudentSchema.parse(data);
-
-      // Check for duplicates if email or student ID is being updated
-      if (data.email || data.studentId) {
-        await this.checkStudentDuplicates(client, data.email || '', data.studentId || '');
+      if (!currentStudent) {
+        throw new StudentNotFoundError(id);
       }
 
-      // 1. Update basic student info
+      // Validate data with proper type validation
+      const validatedData = {
+        ...data,
+        email: data.email ? createEmail(data.email) : undefined,
+        parentPhone: data.parentPhone ? createPhoneNumber(data.parentPhone) : undefined,
+      };
+
+      // Validate student ID format if provided
+      if (data.studentId && !data.studentId.match(/^(STU|PAG)\d{3,}$/)) {
+        throw new ServiceError(
+          'Student ID must start with STU or PAG followed by numbers',
+          'INVALID_STUDENT_ID',
+          400
+        );
+      }
+
+      // Only check for duplicates if the value is different from current
+      if ((validatedData.email && validatedData.email !== currentStudent.email) || 
+          (data.studentId && data.studentId !== currentStudent.student_id)) {
+        await this.checkStudentDuplicates(
+          client,
+          validatedData.email !== currentStudent.email ? validatedData.email : undefined,
+          data.studentId !== currentStudent.student_id ? data.studentId : undefined,
+          id
+        );
+      }
+
+      // Validate date of birth if provided
+      if (data.dob) {
+        const dob = new Date(data.dob);
+        if (isNaN(dob.getTime()) || dob >= new Date()) {
+          throw new ServiceError(
+            'Invalid date of birth',
+            'INVALID_DOB',
+            400
+          );
+        }
+      }
+
+      // Update basic student info
       const updateParts: string[] = [];
       const updateValues: any[] = [id];
       let paramCount = 2;
 
       if (data.name) {
-        updateParts.push(`name = $${paramCount}`);
+        updateParts.push(`name = $${paramCount++}`);
         updateValues.push(data.name);
-        paramCount++;
       }
       if (data.studentId) {
-        updateParts.push(`student_id = $${paramCount}`);
+        updateParts.push(`admission_number = $${paramCount++}`);
         updateValues.push(data.studentId);
-        paramCount++;
       }
-      if (data.email) {
-        updateParts.push(`email = $${paramCount}`);
-        updateValues.push(data.email);
-        paramCount++;
+      if (validatedData.email) {
+        updateParts.push(`email = $${paramCount++}`);
+        updateValues.push(validatedData.email);
       }
-      if (data.parentPhone) {
-        updateParts.push(`parent_phone = $${paramCount}`);
-        updateValues.push(data.parentPhone);
-        paramCount++;
+      if (validatedData.parentPhone) {
+        updateParts.push(`parent_phone = $${paramCount++}`);
+        updateValues.push(validatedData.parentPhone);
       }
       if (data.dob) {
-        updateParts.push(`dob = $${paramCount}`);
+        updateParts.push(`dob = $${paramCount++}`);
         updateValues.push(data.dob);
-        paramCount++;
       }
       if (data.status) {
-        updateParts.push(`status = $${paramCount}`);
+        updateParts.push(`status = $${paramCount++}`);
         updateValues.push(data.status);
-        paramCount++;
       }
 
       if (updateParts.length > 0) {
@@ -381,7 +484,7 @@ export class StudentService {
         );
       }
 
-      // 2. Update class if provided
+      // Update class if provided
       if (data.class) {
         const classId = await this.getClassIdByName(client, data.class);
         

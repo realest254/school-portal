@@ -16,7 +16,7 @@ import {
 } from '../../services/student.service';
 import { z } from 'zod';
 
-interface StudentFilters {
+export interface StudentFilters {
     status?: 'active' | 'inactive';
     class?: string;
     search?: string;
@@ -143,6 +143,14 @@ export class StudentTestService {
             CREATE INDEX IF NOT EXISTS idx_classes_name ON classes(name);
             CREATE INDEX IF NOT EXISTS idx_class_students_student_id ON class_students(student_id);
             CREATE INDEX IF NOT EXISTS idx_class_students_class_id ON class_students(class_id);
+        `);
+
+        // Insert test classes
+        await this.db.exec(`
+            INSERT INTO classes (id, name, grade, stream, academic_year, is_active) VALUES
+            ('cls1', 'Class 1A', 1, 'A', 2023, 1),
+            ('cls2', 'Class 2B', 2, 'B', 2023, 1),
+            ('cls3', 'Class 3C', 3, 'C', 2023, 1);
         `);
     }
 
