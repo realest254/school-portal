@@ -102,7 +102,7 @@ CREATE TABLE IF NOT EXISTS invites (
     email TEXT NOT NULL UNIQUE,
     role TEXT NOT NULL CHECK (role IN ('student', 'teacher')),
     invited_by UUID REFERENCES profiles(id) NOT NULL,
-    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'cancelled')),
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'accepted')),
     token TEXT UNIQUE,
     expires_at TIMESTAMPTZ NOT NULL,
     accepted_at TIMESTAMPTZ,

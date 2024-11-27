@@ -57,7 +57,21 @@ class AuthService {
    * @returns {Promise<Object>} Created invite details
    */
   async createInvite(email, role) {
-    const response = await axios.post(this.apiUrl, { email, role });
+    const session = await this.supabase.auth.getSession();
+    const adminToken = session?.data?.session?.access_token;
+    
+    if (!adminToken) {
+      throw new Error('Not authorized to create invites');
+    }
+
+    const response = await axios.post(this.apiUrl, 
+      { email, role },
+      { 
+        headers: { 
+          'Authorization': `Bearer ${adminToken}`
+        }
+      }
+    );
     return response.data;
   }
 
@@ -68,64 +82,73 @@ class AuthService {
    * @returns {Promise<Object>} Created invites details
    */
   async createBulkInvites(emails, role) {
-    const response = await axios.post(`${this.apiUrl}/bulk`, { emails, role });
+    const session = await this.supabase.auth.getSession();
+    const adminToken = session?.data?.session?.access_token;
+    
+    if (!adminToken) {
+      throw new Error('Not authorized to create invites');
+    }
+
+    const response = await axios.post(
+      `${this.apiUrl}/bulk`, 
+      { emails, role },
+      { 
+        headers: { 
+          'Authorization': `Bearer ${adminToken}`
+        }
+      }
+    );
     return response.data;
   }
 
   /**
-   * Validate and decrypt invite token
+   * Validate invite token
    * @param {string} token - Encrypted token from invite URL
    * @returns {Promise<Object>} Validation result with invite details
    */
-  async validateToken(token) {
-    const response = await axios.post(`${this.apiUrl}/decrypt-token`, { token });
-    return response.data;
+  async validateInvite(token) {
+    try {
+      const response = await axios.post(`${this.apiUrl}/validate-invite`, { token });
+      return response.data;
+    } catch (error) {
+      throw new Error(error.response?.data?.message || 'Failed to validate invite');
+    }
   }
 
   /**
-   * Accept invite and create account without automatic sign in
+   * Sign up with invite
    * @param {string} email - User email
    * @param {string} password - User password
    * @param {string} inviteId - Invite ID
    * @param {string} role - User role from invite token
    * @returns {Promise<Object>} Result of account creation
    */
-  async acceptInvite(email, password, inviteId, role) {
+  async signUpWithInvite({ email, password, inviteId, role }) {
     try {
-      // First accept the invite in our backend
-      const response = await axios.post(`${this.apiUrl}/accept`, { 
-        inviteId, 
-        email, 
-        role 
-      });
-
-      if (!response.data.success) {
-        throw new Error(response.data.message || 'Failed to accept invite');
-      }
-
-      // Then sign up user with Supabase without auto sign in
-      const { data: authData, error: signUpError } = await this.supabase.auth.signUp({
+      // Create user in Supabase
+      const { data: { user }, error: signUpError } = await this.supabase.auth.signUp({
         email,
         password,
         options: {
           data: {
-            role: role
-          },
-          emailRedirectTo: `${window.location.origin}/auth/login`
+            role,
+            invite_id: inviteId
+          }
         }
       });
 
       if (signUpError) throw signUpError;
 
-      return {
-        success: true,
-        message: 'Account created successfully. Please check your email and sign in.',
-        email: email,
-        role: role
-      };
+      // Accept the invite
+      await axios.post(`${this.apiUrl}/accept`, {
+        id: inviteId,
+        email,
+        role
+      });
+
+      return { user };
     } catch (error) {
-      console.error('Error accepting invite:', error);
-      throw new Error(error.message || 'Failed to create account');
+      throw new Error(error.response?.data?.message || error.message || 'Failed to create account');
     }
   }
 

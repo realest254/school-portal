@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase';
 import { encrypt } from '../utils/encryption';
+import { Invite, InviteToken, getTokenString } from '../types/invite.types';
 
 interface EmailTemplate {
   subject: string;
@@ -9,8 +10,10 @@ interface EmailTemplate {
 export class EmailService {
   private static instance: EmailService;
   private readonly templates: Record<string, EmailTemplate>;
+  private readonly isTestEnvironment: boolean;
 
   private constructor() {
+    this.isTestEnvironment = process.env.NODE_ENV === 'test';
     this.templates = {
       studentInvite: {
         subject: 'Welcome to School Portal - Student Invitation',
@@ -74,23 +77,26 @@ export class EmailService {
   }
 
   public async sendInviteEmail(
-    email: string,
-    role: string,
-    inviteId: string,
+    invite: Invite,
+    token: InviteToken,
     frontendUrl: string
-  ): Promise<void> {
+  ): Promise<{ success: boolean; error?: string }> {
     try {
-      // Get the appropriate template
-      const template = this.getTemplate(role);
+      // In test environment, just log and return success
+      if (this.isTestEnvironment) {
+        console.log('Test environment: Skipping email send for invite:', {
+          email: invite.email,
+          role: invite.role,
+          token: getTokenString(token)
+        });
+        return { success: true };
+      }
 
-      // Create token with all invite data
-      const tokenData = {
-        id: inviteId,
-        email: email,
-        role: role
-      };
-      const encryptedToken = encrypt(tokenData);
-      const signupUrl = `${frontendUrl}/auth/signup?token=${encryptedToken}`;
+      // Get the appropriate template
+      const template = this.getTemplate(invite.role);
+
+      // Create signup URL with token
+      const signupUrl = `${frontendUrl}/auth/signup?token=${getTokenString(token)}`;
 
       // Replace template variables
       const htmlContent = this.replaceTemplateVariables(template.body, {
@@ -98,17 +104,19 @@ export class EmailService {
       });
 
       // Send email using Supabase
-      const { error } = await supabase.auth.api.sendEmail(email, {
+      const { error } = await supabase.auth.api.sendEmail(invite.email, {
         subject: template.subject,
-        html: htmlContent
+        html: htmlContent,
       });
 
-      if (error) {
-        throw error;
-      }
+      if (error) throw error;
+      return { success: true };
     } catch (error) {
       console.error('Failed to send invite email:', error);
-      throw error;
+      return { 
+        success: false, 
+        error: error instanceof Error ? error.message : 'Failed to send invite email' 
+      };
     }
   }
 }

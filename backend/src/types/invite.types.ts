@@ -4,8 +4,7 @@ import { encrypt, decrypt } from '../utils/encryption';
 export enum InviteStatus {
   PENDING = 'pending',
   ACCEPTED = 'accepted',
-  EXPIRED = 'expired',
-  CANCELLED = 'cancelled'
+  EXPIRED = 'expired'
 }
 
 export enum UserRole {
@@ -19,20 +18,19 @@ export const InviteSchema = z.object({
   email: z.string().email(),
   role: z.nativeEnum(UserRole),
   status: z.nativeEnum(InviteStatus),
-  invited_by: z.string().uuid(),
-  expiration_date: z.date(),
+  invited_by: z.string(),
+  token: z.string().nullable(),
+  expires_at: z.date(),
   created_at: z.date(),
   updated_at: z.date(),
-  used_at: z.date().nullable(),
-  used_by: z.string().uuid().nullable(),
-  token: z.string().nullable()
+  accepted_at: z.date().nullable(),
+  accepted_by: z.string().nullable()
 });
 
 export const CreateInviteSchema = z.object({
   email: z.string().email(),
   role: z.nativeEnum(UserRole),
-  invited_by: z.string().uuid(),
-  expiration_date: z.date().optional()
+  invited_by: z.string()
 });
 
 export const BulkInviteSchema = z.object({
@@ -40,8 +38,7 @@ export const BulkInviteSchema = z.object({
     email: z.string().email(),
     role: z.nativeEnum(UserRole)
   })),
-  invited_by: z.string().uuid(),
-  expiration_date: z.date().optional()
+  invited_by: z.string()
 });
 
 export type Invite = z.infer<typeof InviteSchema>;
@@ -93,7 +90,7 @@ export interface TokenData {
   id: string;
   email: string;
   role: UserRole;
-  exp: number;
+  exp: number; // Not used for expiration - we use database expires_at
 }
 
 export interface InviteResult {
@@ -121,27 +118,51 @@ export interface BulkInviteResult {
 export type InviteToken = string & { readonly __brand: unique symbol };
 
 // Add helper functions for type conversion
-export function createInviteToken(tokenData: TokenData): InviteToken {
-  const tokenString = JSON.stringify({
-    id: tokenData.id,
-    email: tokenData.email,
-    role: tokenData.role,
-    exp: tokenData.exp
-  });
-  const encryptedToken = encrypt(tokenString);
-  return encryptedToken as InviteToken;
+export function createInviteToken(data: TokenData): InviteToken {
+  try {
+    const tokenString = JSON.stringify(data);
+    return encrypt(tokenString) as InviteToken;
+  } catch (error) {
+    throw new Error('Failed to create token');
+  }
 }
 
 export function parseInviteToken(token: InviteToken): TokenData {
-  const decryptedToken = decrypt(token as string);
   try {
-    const data = JSON.parse(decryptedToken);
-    if (!data.id || !data.email || !data.role || !data.exp) {
-      throw new Error('Invalid token data structure');
+    const decryptedToken = decrypt(token as string);
+    try {
+      const data = JSON.parse(decryptedToken);
+      
+      // Validate token structure
+      if (!data || typeof data !== 'object') {
+        throw new Error('Invalid token: Not a valid JSON object');
+      }
+      
+      // Validate required fields
+      if (!data.id || typeof data.id !== 'string') {
+        throw new Error('Invalid token: Missing or invalid id');
+      }
+      if (!data.email || typeof data.email !== 'string') {
+        throw new Error('Invalid token: Missing or invalid email');
+      }
+      if (!data.role || !Object.values(UserRole).includes(data.role)) {
+        throw new Error('Invalid token: Missing or invalid role');
+      }
+      if (!data.exp || typeof data.exp !== 'number') {
+        throw new Error('Invalid token: Missing or invalid expiration');
+      }
+
+      return {
+        id: data.id,
+        email: data.email,
+        role: data.role,
+        exp: data.exp
+      };
+    } catch (error) {
+      throw new Error('Invalid token structure');
     }
-    return data as TokenData;
   } catch (error) {
-    throw new InvalidTokenError('Invalid token format');
+    throw new Error('Failed to decrypt token');
   }
 }
 

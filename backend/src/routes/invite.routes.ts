@@ -6,7 +6,7 @@ const router = Router();
 const inviteController = new InviteController();
 
 // Public routes
-router.post('/decrypt-token', inviteController.decryptInviteToken);
+router.post('/validate-invite', inviteController.validateInvite); 
 router.post('/accept', inviteController.acceptInvite);
 
 // Protected routes (admin only)

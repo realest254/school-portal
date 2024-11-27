@@ -1,4 +1,4 @@
-import { Pool } from 'pg';
+import { Pool, PoolClient } from 'pg';
 import SQL from 'sql-template-strings';
 import pool from '../db';
 import { supabase } from '../config/supabase';
@@ -6,9 +6,10 @@ import { encrypt, decrypt } from '../utils/encryption';
 import { redisClient } from '../config/redis';
 import { RateLimiter } from '../utils/rate-limiter';
 import logger, { logError } from '../utils/logger';
+import { v4 as uuidv4 } from 'uuid';
 import { 
   logInviteCreated, 
-  logInviteAccepted, 
+  logInviteAccepted,
   logInviteCancelled, 
   logInviteError 
 } from '../utils/audit-logger';
@@ -24,6 +25,7 @@ import {
   InvalidTokenError,
   ExpiredTokenError,
   DomainError,
+  RateLimitError,
   SpamError,
   InviteError,
   InviteToken,
@@ -37,6 +39,7 @@ export class InviteService {
   private static instance: InviteService;
   private readonly db: Pool;
   private readonly INVITE_CACHE_TTL = 3600; // 1 hour
+  private readonly INVITE_EXPIRY_DAYS = 7; // 7 days
   private readonly ALLOWED_DOMAINS = process.env.ALLOWED_DOMAINS?.split(',') || ['school.edu', 'district.edu'];
 
   private constructor() {
@@ -94,63 +97,70 @@ export class InviteService {
   generateToken(data: Omit<TokenData, 'exp'>): InviteToken {
     const tokenData: TokenData = {
       ...data,
-      exp: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60) // 7 days
+      exp: Math.floor(Date.now() / 1000) + (this.INVITE_EXPIRY_DAYS * 24 * 60 * 60)
     };
     return createInviteToken(tokenData);
   }
 
   async createInvite(data: CreateInviteDto, ip?: string): Promise<InviteResult> {
     const client = await this.db.connect();
+
     try {
+      // Basic input validation
+      if (!data.email?.trim()) {
+        throw new InviteError('Email is required', 'INVALID_EMAIL', 400);
+      }
+      if (!data.invited_by?.trim()) {
+        throw new InviteError('Invited by is required', 'INVALID_INVITED_BY', 400);
+      }
+
+      // Validate email format
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(data.email)) {
+        throw new InviteError('Invalid email format', 'INVALID_EMAIL_FORMAT', 400);
+      }
+
+      await client.query('BEGIN');
+
       // Check rate limits
       await RateLimiter.checkIpLimit(ip || 'unknown');
       await RateLimiter.checkEmailLimit(data.email);
-      
+
       // Validate email domain
       const domainCheck = await this.validateEmailDomain(data.email, data.role);
       if (!domainCheck.valid) {
         throw new InviteError(domainCheck.message || 'Invalid email domain', 'INVALID_EMAIL_DOMAIN', 400);
       }
-      
+
       // Check for spam
       const spamCheck = await this.checkInviteSpam(data.email);
       if (spamCheck.isSpam) {
         throw new InviteError(spamCheck.message || 'Too many invite attempts', 'SPAM_DETECTED', 429);
       }
 
-      await client.query('BEGIN');
-      
-      // Validate expiration date
-      let expiration: Date;
-      if (data.expiration_date) {
-        const date = new Date(data.expiration_date);
-        if (isNaN(date.getTime())) {
-          throw new InviteError('Invalid expiration date', 'INVALID_EXPIRATION_DATE', 400);
-        }
-        expiration = date;
-      } else {
-        expiration = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-      }
-      
-      // Create invite with row-level locking
+      // Set expiration to 7 days from now
+      const now = new Date();
+      const expires_at = new Date(now.getTime() + (this.INVITE_EXPIRY_DAYS * 24 * 60 * 60 * 1000));
+
+      // Create invite
       const result = await client.query(SQL`
         INSERT INTO invites (
-          email, role, status, invited_by, expiration_date
+          email, role, status, invited_by, expires_at
         ) VALUES (
-          ${data.email}, ${data.role}, ${InviteStatus.PENDING}, ${data.invited_by}, ${expiration}
+          ${data.email}, ${data.role}, ${InviteStatus.PENDING}, ${data.invited_by}, ${expires_at}
         ) RETURNING *
         FOR UPDATE
       `);
 
       const invite = result.rows[0];
 
-      // Generate token with expiry
+      // Generate token
       const token = this.generateToken({
         id: invite.id,
-        email: data.email,
-        role: data.role
+        email: invite.email,
+        role: invite.role
       });
-      
+
       // Send invite email with retry logic
       const emailResult = await this.sendInviteEmail(invite, token);
       if (!emailResult.success) {
@@ -160,19 +170,23 @@ export class InviteService {
 
       // Cache the invite
       await redisClient.set(`invite:${invite.id}`, invite, this.INVITE_CACHE_TTL);
-      
+
       await client.query('COMMIT');
 
-      // Log the successful invite creation
-      logInviteCreated(data.invited_by, data.role, invite.id, data.email, data.role, ip);
-      
       return {
         success: true,
         invite
       };
+
     } catch (error) {
       await client.query('ROLLBACK');
-      
+
+      // Preserve specific error types
+      if (error instanceof DomainError || error instanceof SpamError || error instanceof RateLimitError) {
+        throw error;
+      }
+
+      // Wrap unknown errors
       const finalError = error instanceof InviteError 
         ? error 
         : new InviteError(
@@ -204,6 +218,10 @@ export class InviteService {
     try {
       await client.query('BEGIN');
 
+      // Set expiration to 7 days from now for all invites
+      const now = new Date();
+      const expires_at = new Date(now.getTime() + (this.INVITE_EXPIRY_DAYS * 24 * 60 * 60 * 1000));
+
       for (const invite of data.invites) {
         try {
           const domainCheck = await this.validateEmailDomain(invite.email, invite.role);
@@ -215,31 +233,45 @@ export class InviteService {
             throw new InviteError(spamCheck.message || 'Too many invite attempts', 'SPAM_DETECTED', 429);
           }
 
-          const createdInvite = await this.createInvite(
-            {
-              email: invite.email,
-              role: invite.role,
-              invited_by: data.invited_by,
-              expiration_date: data.expiration_date
-            },
-            ip
-          );
+          const createdInvite = await client.query(SQL`
+            INSERT INTO invites (
+              email, role, status, invited_by, expires_at
+            ) VALUES (
+              ${invite.email}, ${invite.role}, ${InviteStatus.PENDING}, ${data.invited_by}, ${expires_at}
+            ) RETURNING *
+            FOR UPDATE
+          `);
 
-          if (!createdInvite.success || !createdInvite.invite) {
-            throw new InviteError(createdInvite.message || 'Failed to create invite', 'CREATE_INVITE_FAILED', 500);
+          const inviteResult = createdInvite.rows[0];
+
+          // Generate token with expiry
+          const token = this.generateToken({
+            id: inviteResult.id,
+            email: invite.email,
+            role: invite.role
+          });
+
+          // Send invite email with retry logic
+          const emailResult = await this.sendInviteEmail(inviteResult, token);
+          if (!emailResult.success) {
+            const errorMessage = emailResult.error || 'Failed to send invite email';
+            throw new InviteError(errorMessage, 'SEND_INVITE_EMAIL_FAILED', 500);
           }
+
+          // Cache the invite
+          await redisClient.set(`invite:${inviteResult.id}`, inviteResult, this.INVITE_CACHE_TTL);
 
           successful.push({
             email: invite.email,
             role: invite.role,
-            invite: createdInvite.invite
+            invite: inviteResult
           });
 
           // Log successful creation
           logInviteCreated(
             data.invited_by,
             invite.role,
-            createdInvite.invite.id,
+            inviteResult.id,
             invite.email,
             invite.role,
             ip
@@ -306,7 +338,7 @@ export class InviteService {
           data: {
             role: invite.role,
             schoolName: process.env.SCHOOL_NAME || 'School Portal',
-            expiresIn: '7 days',
+            expiresIn: `${this.INVITE_EXPIRY_DAYS} days`,
             inviteLink: `${process.env.FRONTEND_URL}/signup?token=${tokenString}`
           }
         }
@@ -318,10 +350,58 @@ export class InviteService {
     }
   }
 
+  // Reusable transaction wrapper
+  private async withTransaction<T>(operation: (client: PoolClient) => Promise<T>): Promise<T> {
+    const client = await this.db.connect();
+    try {
+      await client.query('BEGIN');
+      const result = await operation(client);
+      await client.query('COMMIT');
+      return result;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  // Reusable cache checker for invites
+  private async getInviteFromCache(id: string): Promise<Invite | null> {
+    const cached = await redisClient.get<Invite>(`invite:${id}`);
+    if (cached) {
+      await redisClient.set(`invite:${id}`, cached, this.INVITE_CACHE_TTL);
+      return cached;
+    }
+    return null;
+  }
+
+  // Reusable invite status validator
+  private validateInviteStatus(invite: Invite): { valid: boolean; message?: string } {
+    const now = new Date();
+    const expiresAt = new Date(invite.expires_at);
+
+    if (invite.status !== InviteStatus.PENDING) {
+      return {
+        valid: false,
+        message: 'Invite is no longer valid'
+      };
+    }
+
+    if (expiresAt < now) {
+      return {
+        valid: false,
+        message: 'Invite has expired'
+      };
+    }
+
+    return { valid: true };
+  }
+
   async getById(id: string): Promise<Invite | null> {
     try {
       // Try to get from cache first
-      const cached = await redisClient.get<Invite>(`invite:${id}`);
+      const cached = await this.getInviteFromCache(id);
       if (cached) {
         return cached;
       }
@@ -361,127 +441,48 @@ export class InviteService {
     }
   }
 
-  async checkInviteValidity(id: string): Promise<{ valid: boolean; message?: string }> {
+  async checkInviteValidity(id: string): Promise<{ valid: boolean; message?: string; invite?: Invite }> {
     try {
       // Try cache first
-      const cached = await redisClient.get<Invite>(`invite:${id}`);
+      const cached = await this.getInviteFromCache(id);
       if (cached) {
-        const now = new Date();
-        const expiresAt = new Date(cached.expiration_date);
-        
-        if (cached.status !== InviteStatus.PENDING) {
-          return {
-            valid: false,
-            message: 'Invite is no longer valid'
-          };
-        }
-
-        if (expiresAt < now) {
-          return {
-            valid: false,
-            message: 'Invite has expired'
-          };
-        }
-
-        return { valid: true };
-      }
-
-      // If not in cache, check database
-      const result = await this.db.query<Invite>(SQL`
-        SELECT * FROM invites 
-        WHERE id = ${id} 
-        AND status = ${InviteStatus.PENDING}
-      `);
-      
-      if (result.rows.length === 0) {
+        const validationResult = this.validateInviteStatus(cached);
         return {
-          valid: false,
-          message: 'Invite not found'
+          ...validationResult,
+          invite: validationResult.valid ? cached : undefined
         };
       }
 
-      const invite = result.rows[0];
-      const now = new Date();
-      const expiresAt = new Date(invite.expiration_date);
-
-      if (expiresAt < now) {
-        return {
-          valid: false,
-          message: 'Invite has expired'
-        };
-      }
-
-      // Cache the valid invite
-      await redisClient.set(`invite:${id}`, invite, this.INVITE_CACHE_TTL);
-      
-      return { valid: true };
-    } catch (error) {
-      logger.error('Error checking invite validity:', error);
-      throw new InviteError(
-        error instanceof Error ? error.message : 'Failed to check invite validity',
-        'CHECK_INVITE_VALIDITY_FAILED',
-        500
-      );
-    }
-  }
-
-  async markInviteAsUsed(id: string, acceptedBy: string): Promise<void> {
-    const client = await this.db.connect();
-    try {
-      await client.query('BEGIN');
-
-      // First check if invite exists and is valid
-      const checkResult = await client.query<Invite>(SQL`
-        SELECT * FROM invites 
-        WHERE id = ${id} 
+      // Query database
+      const result = await this.db.query(SQL`
+        SELECT * FROM invites
+        WHERE id = ${id}
         AND status = ${InviteStatus.PENDING}
         FOR UPDATE
       `);
 
-      if (checkResult.rows.length === 0) {
-        throw new InviteError('Invite not found or already used', 'INVALID_INVITE_STATUS', 400);
+      if (result.rows.length === 0) {
+        return {
+          valid: false,
+          message: 'Invite not found or already used'
+        };
       }
 
-      const invite = checkResult.rows[0];
-      const now = new Date();
-      const expiresAt = new Date(invite.expiration_date);
+      const invite = result.rows[0];
+      const validationResult = this.validateInviteStatus(invite);
+      
+      return {
+        ...validationResult,
+        invite: validationResult.valid ? invite : undefined
+      };
 
-      if (expiresAt < now) {
-        throw new InviteError('Invite has expired', 'INVITE_EXPIRED', 400);
-      }
-
-      // Update the invite
-      await client.query(SQL`
-        UPDATE invites 
-        SET status = ${InviteStatus.ACCEPTED},
-            accepted_at = NOW(),
-            accepted_by = ${acceptedBy},
-            updated_at = NOW()
-        WHERE id = ${id}
-        AND status = ${InviteStatus.PENDING}
-        AND expiration_date > NOW()
-      `);
-
-      // Invalidate cache
-      await redisClient.del(`invite:${id}`);
-
-      // Log the successful acceptance
-      logInviteAccepted(acceptedBy, invite.role, id, invite.email);
-
-      await client.query('COMMIT');
     } catch (error) {
-      await client.query('ROLLBACK');
-      if (error instanceof InviteError) {
-        throw error;
-      }
-      logger.error('Error marking invite as used:', error);
+      logError(error, 'checkInviteValidity');
       throw new InviteError(
-        error instanceof Error ? error.message : 'Failed to mark invite as used',
-        'MARK_INVITE_AS_USED_FAILED',
+        error instanceof Error ? error.message : 'Failed to check invite validity',
+        'CHECK_INVITE_FAILED',
         500
       );
-    } finally {
-      client.release();
     }
   }
 
@@ -518,131 +519,157 @@ export class InviteService {
     }
   }
 
-  async decryptAndValidateToken(token: string): Promise<{ 
-    valid: boolean; 
-    reason?: 'expired' | 'invalid' | 'error'; 
+  async acceptInvite(data: { id: string; email: string; role: UserRole }, acceptedBy: string): Promise<InviteResult> {
+    return this.withTransaction(async (client) => {
+      const invite = await this.getById(data.id);
+      if (!invite) {
+        throw new InviteError('Invite not found', 'INVITE_NOT_FOUND', 404);
+      }
+
+      const validationResult = this.validateInviteStatus(invite);
+      if (!validationResult.valid) {
+        throw new InviteError(validationResult.message || 'Invalid invite', 'INVALID_INVITE', 400);
+      }
+
+      // Update invite status
+      const result = await client.query(SQL`
+        UPDATE invites 
+        SET status = ${InviteStatus.ACCEPTED}, 
+            accepted_at = NOW(),
+            accepted_by = ${acceptedBy}
+        WHERE id = ${data.id} 
+        RETURNING *
+      `);
+
+      const acceptedInvite = result.rows[0];
+
+      // Invalidate cache
+      await redisClient.del(`invite:${data.id}`);
+
+      // Log the acceptance
+      logInviteAccepted(acceptedBy, UserRole.STUDENT, data.id);
+
+      return {
+        success: true,
+        invite: acceptedInvite
+      };
+    });
+  }
+
+  async decryptAndValidateToken(token: InviteToken): Promise<{
+    valid: boolean;
     message?: string;
     invite?: {
       id: string;
       email: string;
       role: UserRole;
       status: InviteStatus;
-      expiration_date: Date;
+      expires_at: Date;
     };
   }> {
     try {
       const inviteToken = stringToInviteToken(token);
       const tokenData = parseInviteToken(inviteToken);
 
-      // Validate token expiration
-      if (new Date(tokenData.exp) < new Date()) {
+      // Check if token is expired
+      const now = Math.floor(Date.now() / 1000);
+      if (tokenData.exp <= now) {
         return {
           valid: false,
-          reason: 'expired',
-          message: 'Invite token has expired'
+          message: 'Token has expired'
         };
       }
 
-      const invite = await this.getById(tokenData.id);
-      if (!invite) {
+      // Get invite from database
+      const result = await this.db.query(SQL`
+        SELECT id, email, role, status, expires_at
+        FROM invites
+        WHERE id = ${tokenData.id}
+        AND status = ${InviteStatus.PENDING}
+      `);
+
+      if (result.rows.length === 0) {
         return {
           valid: false,
-          reason: 'invalid',
-          message: 'Invite not found'
+          message: 'Invite not found or already used'
         };
       }
 
-      if (invite.status !== InviteStatus.PENDING) {
+      const invite = result.rows[0];
+      const expiresAt = new Date(invite.expires_at);
+
+      if (expiresAt < new Date()) {
         return {
           valid: false,
-          reason: 'invalid',
-          message: `Invite is ${invite.status.toLowerCase()}`
+          message: 'Invite has expired'
         };
       }
 
       return {
         valid: true,
-        invite: {
-          id: invite.id,
-          email: invite.email,
-          role: invite.role,
-          status: invite.status,
-          expiration_date: invite.expiration_date
-        }
+        invite
       };
+
     } catch (error) {
       logError(error, 'decryptAndValidateToken');
       if (error instanceof InvalidTokenError) {
         return {
           valid: false,
-          reason: 'invalid',
-          message: 'Invalid token format'
+          message: 'Invalid token'
         };
       }
       throw error;
     }
   }
 
-  async acceptInvite(data: { id: string; email: string; role: string }): Promise<{ success: boolean; message?: string }> {
+  async validateInvite(token: string, clientIp: string): Promise<{ valid: boolean; message?: string; invite?: Invite }> {
     const client = await this.db.connect();
     try {
-      await client.query('BEGIN');
+      // Check rate limiting
+      await RateLimiter.checkIpLimit(clientIp);
 
-      // Check if invite exists and is valid
-      const validityCheck = await this.decryptAndValidateToken(data.id);
-      if (!validityCheck.valid) {
-        throw new InviteError(validityCheck.message || 'Invalid invite', 'INVALID_INVITE', 400);
+      // First check cache
+      const cacheKey = `invite:validate:${token}`;
+      const cachedResult = await redisClient.get<{ valid: boolean; message?: string; invite?: Invite }>(cacheKey);
+      if (cachedResult) {
+        return cachedResult;
       }
 
-      // Get invite details
-      const inviteResult = await client.query<Invite>(SQL`
-        SELECT * FROM invites 
-        WHERE id = ${data.id}
-        AND status = ${InviteStatus.PENDING}
-      `);
+      // Decrypt and validate token
+      const inviteToken = stringToInviteToken(token);
+      const tokenData = await this.decryptAndValidateToken(inviteToken);
 
-      if (inviteResult.rows.length === 0) {
-        throw new InviteError('Invite not found or already used', 'INVITE_NOT_FOUND', 404);
+      if (!tokenData.valid || !tokenData.invite) {
+        return { valid: false, message: tokenData.message };
       }
 
-      const invite = inviteResult.rows[0];
+      // Get invite details and check validity
+      const invite = await this.getById(tokenData.invite.id);
       if (!invite) {
-        throw new InviteError('Invite not found', 'INVITE_NOT_FOUND', 404);
+        return { valid: false, message: 'Invite not found' };
       }
 
-      // Validate email matches
-      if (invite.email !== data.email) {
-        throw new InviteError('Email does not match invite', 'EMAIL_MISMATCH', 400);
+      if (invite.status !== InviteStatus.PENDING) {
+        return { valid: false, message: 'Invite is no longer valid' };
       }
 
-      // Validate role matches
-      if (invite.role !== data.role) {
-        throw new InviteError('Role does not match invite', 'ROLE_MISMATCH', 400);
+      const now = new Date();
+      const expiresAt = new Date(invite.expires_at);
+      if (expiresAt < now) {
+        return { valid: false, message: 'Invite has expired' };
       }
 
-      // Check domain validation
-      const domainCheck = await this.validateEmailDomain(data.email, invite.role as UserRole);
-      if (!domainCheck.valid) {
-        throw new InviteError(domainCheck.message || 'Invalid email domain', 'INVALID_EMAIL_DOMAIN', 400);
-      }
+      const result = { valid: true, invite };
 
-      // Check for spam
-      const spamCheck = await this.checkInviteSpam(data.email);
-      if (spamCheck.isSpam) {
-        throw new InviteError(spamCheck.message || 'Too many invite attempts', 'SPAM_DETECTED', 429);
-      }
-
-      // Mark invite as accepted
-      await this.markInviteAsUsed(data.id, data.email);
+      // Cache the validation result
+      await redisClient.set(cacheKey, JSON.stringify(result), this.INVITE_CACHE_TTL);
 
       await client.query('COMMIT');
-      return { success: true };
+      return result;
+
     } catch (error) {
       await client.query('ROLLBACK');
-      if (error instanceof InviteError) {
-        throw error;
-      }
-      throw new InviteError(error instanceof Error ? error.message : 'Failed to accept invite', 'ACCEPT_INVITE_FAILED', 500);
+      throw error;
     } finally {
       client.release();
     }

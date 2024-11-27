@@ -19,6 +19,34 @@ export class InviteController {
     this.inviteService = InviteService.getInstance();
   }
 
+  validateInvite = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { token } = req.body;
+      
+      if (!token || typeof token !== 'string') {
+        res.status(400).json({ 
+          valid: false, 
+          reason: 'invalid',
+          message: 'Valid token string is required' 
+        });
+        return;
+      }
+
+      // Get client IP for rate limiting
+      const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
+
+      const result = await this.inviteService.validateInvite(token, clientIp);
+      res.json(result);
+    } catch (error) {
+      logError(error, 'validateInvite');
+      res.status(400).json({ 
+        valid: false, 
+        reason: 'error',
+        message: error instanceof Error ? error.message : 'Failed to validate invite'
+      });
+    }
+  };
+
   createInvite = async (req: Request, res: Response): Promise<void> => {
     try {
       const { email, role } = req.body as CreateInviteDTO;
@@ -86,77 +114,48 @@ export class InviteController {
     }
   };
 
-  decryptInviteToken = async (req: Request, res: Response): Promise<void> => {
+  acceptInvite = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { token } = req.body;
-      if (!token || typeof token !== 'string') {
+      const { id, email, role } = req.body;
+      const userId = (req as any).user.id;
+
+      if (!id || !email || !role) {
         res.status(400).json({ 
-          valid: false, 
-          reason: 'invalid',
-          message: 'Valid token string is required' 
+          success: false, 
+          message: 'Missing required fields' 
         });
         return;
       }
 
-      const result = await this.inviteService.decryptAndValidateToken(token);
+      const result = await this.inviteService.acceptInvite({ id, email, role }, userId);
       res.json(result);
     } catch (error) {
-      logError(error, 'decryptInviteToken');
-      const message = error instanceof Error ? error.message : 'Failed to decrypt invite token';
+      logError(error, 'acceptInvite');
       res.status(400).json({ 
-        valid: false, 
-        reason: 'error',
-        message 
+        success: false, 
+        message: error instanceof Error ? error.message : 'Failed to accept invite'
       });
     }
   };
 
-  acceptInvite = async (req: Request, res: Response): Promise<void> => {
+  getInviteHistory = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { inviteId, email, role } = req.body;
-      
-      if (!inviteId || !email || !role) {
-        res.status(400).json({ error: 'Invite ID, email, and role are required' });
-        return;
-      }
-
-      const result = await this.inviteService.acceptInvite({
-        id: inviteId,
-        email,
-        role
-      });
-
-      res.status(200).json(result);
+      const userId = (req as any).user.id;
+      const history = await this.inviteService.getInviteHistory(userId);
+      res.json(history);
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to accept invite';
-      res.status(400).json({ error: message });
+      res.status(400).json({ error: 'Failed to get invite history' });
     }
   };
 
   resendInvite = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
-      const { email } = req.body;
       const userId = (req as any).user.id;
-      const result = await this.inviteService.resendInvite(email, userId);
-      
-      if (!result.success || !result.invite) {
-        throw new Error(result.message || 'Failed to resend invite');
-      }
-      
+      const result = await this.inviteService.resendInvite(id, userId);
       res.json(result);
     } catch (error) {
       res.status(400).json({ error: 'Failed to resend invite' });
-    }
-  };
-
-  getInviteHistory = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const { email } = req.query as { email: string };
-      const history = await this.inviteService.getInviteHistory(email);
-      res.json(history);
-    } catch (error) {
-      res.status(400).json({ error: 'Failed to get invite history' });
     }
   };
 }

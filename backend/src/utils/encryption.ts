@@ -21,18 +21,31 @@ export function encrypt(text: string): string {
 
 export function decrypt(token: string): string {
   try {
-    const [ivString, encryptedString] = token.split(':');
-    if (!ivString || !encryptedString) {
-      throw new Error('Invalid token format');
+    // First validate token format
+    if (!token || typeof token !== 'string' || !token.includes(':')) {
+      throw new Error('Invalid token format: Token must be in format iv:encrypted');
     }
 
-    const iv = Buffer.from(ivString, 'base64');
-    const encrypted = Buffer.from(encryptedString, 'base64');
-    
-    const decipher = crypto.createDecipheriv(ALGORITHM, Buffer.from(ENCRYPTION_KEY), iv);
-    const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
-    
-    return decrypted.toString();
+    const [ivString, encryptedString] = token.split(':');
+    if (!ivString || !encryptedString) {
+      throw new Error('Invalid token format: Missing IV or encrypted data');
+    }
+
+    try {
+      const iv = Buffer.from(ivString, 'base64');
+      const encrypted = Buffer.from(encryptedString, 'base64');
+      
+      if (iv.length !== IV_LENGTH) {
+        throw new Error('Invalid IV length');
+      }
+
+      const decipher = crypto.createDecipheriv(ALGORITHM, Buffer.from(ENCRYPTION_KEY), iv);
+      const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
+      
+      return decrypted.toString();
+    } catch (error) {
+      throw new Error('Failed to decrypt data');
+    }
   } catch (error) {
     console.error('Decryption error:', error);
     throw new Error('Failed to decrypt data');
