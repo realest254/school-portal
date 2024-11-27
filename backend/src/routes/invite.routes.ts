@@ -7,7 +7,9 @@ const inviteController = new InviteController();
 
 // Public routes
 router.post('/validate-invite', inviteController.validateInvite); 
-router.post('/accept', inviteController.acceptInvite);
+
+// Protected route (any authenticated user)
+router.post('/accept', verifyToken, inviteController.acceptInvite);
 
 // Protected routes (admin only)
 router.use(verifyToken);
@@ -21,8 +23,5 @@ router.post('/bulk', inviteController.createBulkInvites);
 
 // Get invite history
 router.get('/history', inviteController.getInviteHistory);
-
-// Resend invite
-router.post('/:id/resend', inviteController.resendInvite);
 
 export default router;

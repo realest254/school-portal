@@ -126,7 +126,7 @@ class AuthService {
   async signUpWithInvite({ email, password, inviteId, role }) {
     try {
       // Create user in Supabase
-      const { data: { user }, error: signUpError } = await this.supabase.auth.signUp({
+      const { data: { user, session }, error: signUpError } = await this.supabase.auth.signUp({
         email,
         password,
         options: {
@@ -139,11 +139,15 @@ class AuthService {
 
       if (signUpError) throw signUpError;
 
-      // Accept the invite
+      // Accept the invite with session token
       await axios.post(`${this.apiUrl}/accept`, {
         id: inviteId,
         email,
         role
+      }, {
+        headers: {
+          Authorization: `Bearer ${session.access_token}`
+        }
       });
 
       return { user };

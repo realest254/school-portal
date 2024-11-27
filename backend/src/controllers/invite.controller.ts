@@ -147,15 +147,4 @@ export class InviteController {
       res.status(400).json({ error: 'Failed to get invite history' });
     }
   };
-
-  resendInvite = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const { id } = req.params;
-      const userId = (req as any).user.id;
-      const result = await this.inviteService.resendInvite(id, userId);
-      res.json(result);
-    } catch (error) {
-      res.status(400).json({ error: 'Failed to resend invite' });
-    }
-  };
 }

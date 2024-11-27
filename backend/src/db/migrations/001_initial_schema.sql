@@ -1,19 +1,6 @@
 -- Enable UUID generation
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- Create profiles table (base user table)
-CREATE TABLE IF NOT EXISTS profiles (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    email TEXT UNIQUE NOT NULL,
-    full_name TEXT,
-    role TEXT NOT NULL CHECK (role IN ('admin', 'teacher', 'student')),
-    metadata JSONB DEFAULT '{}',
-    is_active BOOLEAN DEFAULT true,
-    last_login TIMESTAMPTZ,
-    created_at TIMESTAMPTZ DEFAULT now(),
-    updated_at TIMESTAMPTZ DEFAULT now()
-);
-
 -- Create teachers table
 CREATE TABLE IF NOT EXISTS teachers (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -101,18 +88,12 @@ CREATE TABLE IF NOT EXISTS invites (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     email TEXT NOT NULL UNIQUE,
     role TEXT NOT NULL CHECK (role IN ('student', 'teacher')),
-    invited_by UUID REFERENCES profiles(id) NOT NULL,
     status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'accepted')),
     token TEXT UNIQUE,
     expires_at TIMESTAMPTZ NOT NULL,
     accepted_at TIMESTAMPTZ,
-    accepted_by UUID REFERENCES profiles(id),
     created_at TIMESTAMPTZ DEFAULT now(),
-    updated_at TIMESTAMPTZ DEFAULT now(),
-    CONSTRAINT check_accepted_fields CHECK (
-        (status != 'accepted' AND accepted_at IS NULL AND accepted_by IS NULL) OR
-        (status = 'accepted' AND accepted_at IS NOT NULL AND accepted_by IS NOT NULL)
-    )
+    updated_at TIMESTAMPTZ DEFAULT now()
 );
 
 -- Add indexes for invites table
@@ -139,7 +120,6 @@ CREATE TRIGGER update_invites_updated_at
 -- Add table and column comments
 COMMENT ON TABLE invites IS 'Stores user invitations with improved tracking of usage and updates';
 COMMENT ON COLUMN invites.accepted_at IS 'Timestamp when the invite was accepted';
-COMMENT ON COLUMN invites.accepted_by IS 'ID of the user who accepted the invite';
 COMMENT ON COLUMN invites.updated_at IS 'Timestamp of the last update to this invite';
 
 -- Create indexes for better query performance
@@ -158,5 +138,3 @@ CREATE INDEX IF NOT EXISTS idx_students_status ON students(status);
 CREATE INDEX IF NOT EXISTS idx_classes_name ON classes(name);
 CREATE INDEX IF NOT EXISTS idx_classes_academic_year ON classes(academic_year);
 CREATE INDEX IF NOT EXISTS idx_subjects_name ON subjects(name);
-CREATE INDEX IF NOT EXISTS idx_profiles_role ON profiles(role);
-CREATE INDEX IF NOT EXISTS idx_profiles_email ON profiles(email);
