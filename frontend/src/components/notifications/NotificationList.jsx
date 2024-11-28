@@ -48,7 +48,7 @@ const NotificationList = ({ notifications, onEdit, onDelete }) => {
                 />
               </TableCell>
               <TableCell>
-                {notification.targetAudience.map((audience) => (
+                {notification.target_audience.map((audience) => (
                   <Chip
                     key={audience}
                     label={audience}
@@ -57,7 +57,7 @@ const NotificationList = ({ notifications, onEdit, onDelete }) => {
                   />
                 ))}
               </TableCell>
-              <TableCell>{formatDate(notification.expiryDate)}</TableCell>
+              <TableCell>{notification.expires_at ? formatDate(notification.expires_at) : '-'}</TableCell>
               <TableCell>
                 <Chip
                   label={notification.status}

@@ -10,6 +10,7 @@ import subjectRoutes from './routes/subject.routes';
 import dashboardRoutes from './routes/dashboard.routes';
 import { errorHandler, notFoundHandler } from './middlewares/error.middleware';
 import { rateLimiter, securityHeaders, compressionMiddleware } from './middlewares/security.middleware';
+import SchedulerService from './services/scheduler.service'; // Assuming SchedulerService is defined in this file
 
 dotenv.config();
 
@@ -48,6 +49,10 @@ app.get('/health', (req, res) => {
     environment: process.env.NODE_ENV
   });
 });
+
+// Initialize scheduler
+const schedulerService = new SchedulerService();
+schedulerService.startNotificationExpiryJob();
 
 // Error handling
 app.use(notFoundHandler);

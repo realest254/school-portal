@@ -28,8 +28,8 @@ const NotificationForm = ({
     title: '',
     message: '',
     priority: 'medium',
-    targetAudience: [],
-    expiryDate: new Date()
+    target_audience: [],
+    expires_at: new Date()
   });
 
   React.useEffect(() => {
@@ -38,16 +38,16 @@ const NotificationForm = ({
         title: notification.title,
         message: notification.message,
         priority: notification.priority,
-        targetAudience: notification.targetAudience,
-        expiryDate: new Date(notification.expiryDate)
+        target_audience: notification.target_audience,
+        expires_at: notification.expires_at ? new Date(notification.expires_at) : new Date()
       });
     } else {
       setFormData({
         title: '',
         message: '',
         priority: 'medium',
-        targetAudience: [],
-        expiryDate: new Date()
+        target_audience: [],
+        expires_at: new Date()
       });
     }
   }, [notification]);
@@ -110,11 +110,10 @@ const NotificationForm = ({
             <FormControl fullWidth>
               <InputLabel>Target Audience</InputLabel>
               <Select
-                name="targetAudience"
+                name="target_audience"
                 multiple
-                value={formData.targetAudience}
+                value={formData.target_audience}
                 onChange={handleChange}
-                required
                 renderValue={(selected) => (
                   <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
                     {selected.map((value) => (
@@ -123,24 +122,20 @@ const NotificationForm = ({
                   </Box>
                 )}
               >
-                <MenuItem value="students">Students</MenuItem>
-                <MenuItem value="teachers">Teachers</MenuItem>
-                <MenuItem value="parents">Parents</MenuItem>
+                <MenuItem value="admin">Admin</MenuItem>
+                <MenuItem value="teacher">Teacher</MenuItem>
+                <MenuItem value="student">Student</MenuItem>
               </Select>
             </FormControl>
 
             <LocalizationProvider dateAdapter={AdapterDateFns}>
               <DateTimePicker
                 label="Expiry Date"
-                value={formData.expiryDate}
-                onChange={(newValue) => {
-                  setFormData((prev) => ({
-                    ...prev,
-                    expiryDate: newValue
-                  }));
-                }}
+                value={formData.expires_at}
+                onChange={(newValue) =>
+                  setFormData((prev) => ({ ...prev, expires_at: newValue }))
+                }
                 renderInput={(params) => <TextField {...params} fullWidth />}
-                minDateTime={new Date()}
               />
             </LocalizationProvider>
           </Box>

@@ -3,11 +3,13 @@ import { UserRole } from '../middlewares/auth.middleware';
 import pool from '../db';
 import SQL from 'sql-template-strings';
 import { z } from 'zod';
+import CacheService from '../cache/cache.service';
 
 // Validation schemas
 const UUIDSchema = z.string().uuid();
-const StatusSchema = z.enum(['active', 'inactive', 'deleted']);
+const StatusSchema = z.enum(['active', 'expired', 'deleted']);
 const PrioritySchema = z.enum(['low', 'medium', 'high']);
+const TargetAudienceSchema = z.enum(['admin', 'teacher', 'student']);
 
 interface Notification {
   id: string;
@@ -28,11 +30,32 @@ interface NotificationFilters {
   endDate?: Date;
 }
 
+class NotificationError extends Error {
+  code: string;
+  status: number;
+  errors: any;
+
+  constructor(message: string, code: string, status: number, errors: any) {
+    super(message);
+    this.code = code;
+    this.status = status;
+    this.errors = errors;
+  }
+}
+
+enum NotificationErrorCodes {
+  VALIDATION_ERROR = { code: 'VALIDATION_ERROR', status: 400 },
+  DATABASE_ERROR = { code: 'DATABASE_ERROR', status: 500 },
+  NOT_FOUND = { code: 'NOT_FOUND', status: 404 },
+}
+
 export class NotificationService {
   private db: Pool;
+  private cache: CacheService;
 
   constructor() {
     this.db = pool;
+    this.cache = new CacheService();
   }
 
   private validateFilters(filters: NotificationFilters) {
@@ -43,13 +66,29 @@ export class NotificationService {
       StatusSchema.parse(filters.status);
     }
     if (filters.target_audience) {
-      z.string().parse(filters.target_audience);
+      TargetAudienceSchema.parse(filters.target_audience);
     }
     if (filters.startDate) {
       z.date().parse(filters.startDate);
     }
     if (filters.endDate) {
       z.date().parse(filters.endDate);
+    }
+  }
+
+  private validateInputs(data: any, schema: z.ZodSchema) {
+    try {
+      return schema.parse(data);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        throw new NotificationError(
+          'Validation failed',
+          NotificationErrorCodes.VALIDATION_ERROR.code,
+          NotificationErrorCodes.VALIDATION_ERROR.status,
+          error.errors
+        );
+      }
+      throw error;
     }
   }
 
@@ -107,19 +146,35 @@ export class NotificationService {
 
   async getById(id: string): Promise<Notification | null> {
     try {
+      // Try to get from cache first
+      const cached = await this.cache.get<Notification>('single', id);
+      if (cached) {
+        return cached;
+      }
+
       // Validate UUID
       UUIDSchema.parse(id);
 
       const query = SQL`
-        SELECT * FROM notifications
+        SELECT * FROM notifications 
         WHERE id = ${id} AND status != 'deleted'
       `;
       
       const { rows: [notification] } = await this.db.query(query);
+      
+      if (notification) {
+        // Cache the result
+        await this.cache.set('single', id, notification);
+      }
+      
       return notification || null;
-    } catch (error: any) {
-      const message = error instanceof Error ? error.message : 'Failed to get notification';
-      throw new Error(`Failed to get notification: ${message}`);
+    } catch (error) {
+      throw new NotificationError(
+        'Failed to fetch notification',
+        NotificationErrorCodes.DATABASE_ERROR.code,
+        NotificationErrorCodes.DATABASE_ERROR.status,
+        error
+      );
     }
   }
 
@@ -129,7 +184,14 @@ export class NotificationService {
     page: number,
     limit: number
   ): Promise<{ notifications: Notification[]; total: number }> {
+    const cacheKey = `${userId}:${role}:${page}:${limit}`;
     try {
+      // Try to get from cache first
+      const cached = await this.cache.get<{ notifications: Notification[]; total: number }>('user', cacheKey);
+      if (cached) {
+        return cached;
+      }
+
       // Validate inputs
       UUIDSchema.parse(userId);
       z.enum(['admin', 'teacher', 'student']).parse(role);
@@ -139,33 +201,32 @@ export class NotificationService {
       const offset = (page - 1) * limit;
 
       const query = SQL`
-        SELECT * FROM notifications
-        WHERE status = 'active'
-        AND ${role} = ANY(target_audience)
-        AND (expires_at IS NULL OR expires_at > NOW())
-        ORDER BY created_at DESC
+        SELECT n.*, COUNT(*) OVER() as total
+        FROM notifications n
+        WHERE n.status = 'active'
+        AND n.expires_at > NOW()
+        AND ${role} = ANY(n.target_audience)
+        ORDER BY n.created_at DESC
         LIMIT ${limit} OFFSET ${offset}
       `;
 
-      const countQuery = SQL`
-        SELECT COUNT(*) FROM notifications
-        WHERE status = 'active'
-        AND ${role} = ANY(target_audience)
-        AND (expires_at IS NULL OR expires_at > NOW())
-      `;
-
-      const [dataResult, countResult] = await Promise.all([
-        this.db.query(query),
-        this.db.query(countQuery)
-      ]);
-
-      return {
-        notifications: dataResult.rows,
-        total: parseInt(countResult.rows[0].count)
+      const { rows } = await this.db.query(query);
+      const result = {
+        notifications: rows.map(row => ({ ...row, total: undefined })),
+        total: rows.length > 0 ? Number(rows[0].total) : 0
       };
-    } catch (error: any) {
-      const message = error instanceof Error ? error.message : 'Failed to get notifications for recipient';
-      throw new Error(`Failed to get notifications for recipient: ${message}`);
+
+      // Cache the result
+      await this.cache.set('user', cacheKey, result);
+      
+      return result;
+    } catch (error) {
+      throw new NotificationError(
+        'Failed to fetch notifications',
+        NotificationErrorCodes.DATABASE_ERROR.code,
+        NotificationErrorCodes.DATABASE_ERROR.status,
+        error
+      );
     }
   }
 
@@ -173,17 +234,17 @@ export class NotificationService {
     const client = await this.db.connect();
     try {
       await client.query('BEGIN');
-
+      
       // Validate input data
-      const NotificationSchema = z.object({
-        title: z.string(),
-        message: z.string(),
+      const CreateNotificationSchema = z.object({
+        title: z.string().min(1, "Title cannot be empty"),
+        message: z.string().min(1, "Message cannot be empty"),
         priority: PrioritySchema,
-        target_audience: z.array(z.string()),
+        target_audience: z.array(z.enum(['admin', 'teacher', 'student'])).min(1, "Target audience cannot be empty"),
         expires_at: z.date().optional()
       });
 
-      NotificationSchema.parse(data);
+      this.validateInputs(data, CreateNotificationSchema);
 
       const query = SQL`
         INSERT INTO notifications (
@@ -197,11 +258,22 @@ export class NotificationService {
 
       const { rows: [notification] } = await client.query(query);
       await client.query('COMMIT');
+
+      // Invalidate relevant caches
+      await this.cache.invalidatePattern('user');
+      
       return notification;
-    } catch (error: any) {
+    } catch (error) {
       await client.query('ROLLBACK');
-      const message = error instanceof Error ? error.message : 'Failed to create notification';
-      throw new Error(`Failed to create notification: ${message}`);
+      if (error instanceof NotificationError) {
+        throw error;
+      }
+      throw new NotificationError(
+        'Failed to create notification',
+        NotificationErrorCodes.DATABASE_ERROR.code,
+        NotificationErrorCodes.DATABASE_ERROR.status,
+        error
+      );
     } finally {
       client.release();
     }
@@ -212,85 +284,81 @@ export class NotificationService {
     try {
       await client.query('BEGIN');
 
-      // Validate inputs
-      UUIDSchema.parse(id);
-      const UpdateNotificationSchema = z.object({
-        title: z.string().optional(),
-        message: z.string().optional(),
-        priority: PrioritySchema.optional(),
-        target_audience: z.array(z.string()).optional(),
-        expires_at: z.date().optional(),
-        status: StatusSchema.optional()
-      });
-
-      UpdateNotificationSchema.parse(data);
-
-      const setValues: ReturnType<typeof SQL>[] = [];
-      const queryParts: string[] = [];
-
-      if (data.title !== undefined) {
-        queryParts.push('title = ');
-        setValues.push(SQL`${data.title}`);
-      }
-      if (data.message !== undefined) {
-        queryParts.push('message = ');
-        setValues.push(SQL`${data.message}`);
-      }
-      if (data.priority !== undefined) {
-        queryParts.push('priority = ');
-        setValues.push(SQL`${data.priority}`);
-      }
-      if (data.target_audience !== undefined) {
-        queryParts.push('target_audience = ');
-        setValues.push(SQL`${data.target_audience}`);
-      }
-      if (data.expires_at !== undefined) {
-        queryParts.push('expires_at = ');
-        setValues.push(SQL`${data.expires_at}`);
-      }
-      if (data.status !== undefined) {
-        queryParts.push('status = ');
-        setValues.push(SQL`${data.status}`);
+      const notification = await this.getById(id);
+      if (!notification) {
+        throw new NotificationError(
+          'Notification not found',
+          NotificationErrorCodes.NOT_FOUND.code,
+          NotificationErrorCodes.NOT_FOUND.status
+        );
       }
 
-      if (setValues.length === 0) {
-        throw new Error('No fields to update');
+      // Validate status transition
+      if (data.status && data.status !== notification.status) {
+        if (notification.status === 'expired' && data.status === 'active') {
+          throw new Error('Cannot reactivate expired notification');
+        }
       }
 
-      const setClause = queryParts.map((part, i) => part + setValues[i]).join(', ');
-      const query = SQL`
-        UPDATE notifications 
-        SET ${setClause} 
+      const updateQuery = SQL`
+        UPDATE notifications SET
+          title = COALESCE(${data.title}, title),
+          message = COALESCE(${data.message}, message),
+          priority = COALESCE(${data.priority}, priority),
+          target_audience = COALESCE(${data.target_audience}, target_audience),
+          status = COALESCE(${data.status}, status),
+          expires_at = COALESCE(${data.expires_at}, expires_at),
+          updated_at = NOW()
         WHERE id = ${id}
-        RETURNING *
-      `;
+        RETURNING *`;
 
-      const { rows: [notification] } = await client.query(query);
+      const { rows: [notification] } = await client.query(updateQuery);
       await client.query('COMMIT');
+
+      // Invalidate caches
+      await this.cache.invalidate('single', id);
+      await this.cache.invalidatePattern('user');
+
       return notification;
-    } catch (error: any) {
+    } catch (error) {
       await client.query('ROLLBACK');
-      const message = error instanceof Error ? error.message : 'Failed to update notification';
-      throw new Error(`Failed to update notification: ${message}`);
+      throw error;
     } finally {
       client.release();
     }
   }
 
   async delete(id: string): Promise<void> {
+    const client = await this.db.connect();
     try {
-      // Validate UUID
-      UUIDSchema.parse(id);
+      await client.query('BEGIN');
+
+      const notification = await this.getById(id);
+      if (!notification) {
+        throw new NotificationError(
+          'Notification not found',
+          NotificationErrorCodes.NOT_FOUND.code,
+          NotificationErrorCodes.NOT_FOUND.status
+        );
+      }
 
       const query = SQL`
         UPDATE notifications 
         SET status = 'deleted' 
         WHERE id = ${id}
       `;
-      await this.db.query(query);
-    } catch (error: any) {
-      const message = error instanceof Error ? error.message : 'Failed to delete notification';
-      throw new Error(`Failed to delete notification: ${message}`);
+      
+      await client.query(query);
+      await client.query('COMMIT');
+
+      // Invalidate caches
+      await this.cache.invalidate('single', id);
+      await this.cache.invalidatePattern('user');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
     }
   }
 }
