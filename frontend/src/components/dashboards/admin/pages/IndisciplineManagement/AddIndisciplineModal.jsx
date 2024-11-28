@@ -13,8 +13,12 @@ const AddIndisciplineModal = ({ visible, onCancel, onSubmit }) => {
   const handleSubmit = () => {
     form.validateFields().then((values) => {
       const formattedValues = {
-        ...values,
-        incidentDate: values.incidentDate.format('YYYY-MM-DD'),
+        studentAdmissionNumber: values.studentAdmissionNumber,
+        reporterEmail: values.reporterEmail,
+        incident_date: values.incidentDate.toDate(),
+        description: values.description,
+        severity: values.severity,
+        action_taken: values.actionTaken
       };
       onSubmit(formattedValues);
       form.resetFields();
@@ -35,7 +39,14 @@ const AddIndisciplineModal = ({ visible, onCancel, onSubmit }) => {
       }
       open={visible}
       onCancel={handleCancel}
-      footer={null}
+      footer={[
+        <Button key="cancel" onClick={handleCancel}>
+          Cancel
+        </Button>,
+        <Button key="submit" type="primary" onClick={handleSubmit}>
+          Add Case
+        </Button>
+      ]}
       width={width >= 768 ? '60%' : '95%'}
       style={{
         top: width >= 768 ? '20%' : 10,
@@ -55,16 +66,12 @@ const AddIndisciplineModal = ({ visible, onCancel, onSubmit }) => {
         className="mt-4"
       >
         <Form.Item
-          name="studentName"
-          label={
-            <span className={isDarkMode ? 'text-gray-200' : 'text-gray-700'}>
-              Student Name
-            </span>
-          }
-          rules={[{ required: true, message: 'Please enter student name' }]}
+          name="studentAdmissionNumber"
+          label={<span className={isDarkMode ? 'text-gray-200' : 'text-gray-700'}>Student Admission Number</span>}
+          rules={[{ required: true, message: 'Please enter student admission number' }]}
         >
           <Input
-            placeholder="Enter student name"
+            placeholder="Enter student admission number"
             className={`
               h-10 transition-colors duration-200
               ${
@@ -77,40 +84,29 @@ const AddIndisciplineModal = ({ visible, onCancel, onSubmit }) => {
         </Form.Item>
 
         <Form.Item
-          name="class"
-          label={
-            <span className={isDarkMode ? 'text-gray-200' : 'text-gray-700'}>
-              Class
-            </span>
-          }
-          rules={[{ required: true, message: 'Please select class' }]}
+          name="reporterEmail"
+          label={<span className={isDarkMode ? 'text-gray-200' : 'text-gray-700'}>Reporter Email</span>}
+          rules={[
+            { required: true, message: 'Please enter reporter email' },
+            { type: 'email', message: 'Please enter a valid email' }
+          ]}
         >
-          <Select
-            placeholder="Select class"
+          <Input
+            placeholder="Enter reporter email"
             className={`
               h-10 transition-colors duration-200
               ${
                 isDarkMode
-                  ? '[&_.ant-select-selector]:bg-gray-700 [&_.ant-select-selector]:border-gray-600 [&_.ant-select-selection-item]:text-white [&_.ant-select-selection-placeholder]:text-gray-400 hover:border-blue-400'
-                  : '[&_.ant-select-selector]:bg-slate-50 [&_.ant-select-selector]:border-slate-300 [&_.ant-select-selection-item]:text-slate-900 [&_.ant-select-selection-placeholder]:text-slate-500 hover:border-blue-500'
+                  ? 'bg-gray-700 border-gray-600 text-white placeholder:text-gray-400 hover:border-blue-400 focus:border-blue-400'
+                  : 'bg-slate-50 border-slate-300 text-slate-900 placeholder:text-slate-500 hover:border-blue-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30'
               }
             `}
-          >
-            {[...Array(12)].map((_, i) => (
-              <Option key={i + 1} value={`Form ${i + 1}`}>
-                Form {i + 1}
-              </Option>
-            ))}
-          </Select>
+          />
         </Form.Item>
 
         <Form.Item
           name="incidentDate"
-          label={
-            <span className={isDarkMode ? 'text-gray-200' : 'text-gray-700'}>
-              Incident Date
-            </span>
-          }
+          label={<span className={isDarkMode ? 'text-gray-200' : 'text-gray-700'}>Incident Date</span>}
           rules={[{ required: true, message: 'Please select incident date' }]}
         >
           <DatePicker
@@ -127,14 +123,11 @@ const AddIndisciplineModal = ({ visible, onCancel, onSubmit }) => {
 
         <Form.Item
           name="description"
-          label={
-            <span className={isDarkMode ? 'text-gray-200' : 'text-gray-700'}>
-              Description
-            </span>
-          }
+          label={<span className={isDarkMode ? 'text-gray-200' : 'text-gray-700'}>Description</span>}
           rules={[{ required: true, message: 'Please enter description' }]}
         >
           <Input.TextArea
+            rows={4}
             placeholder="Enter incident description"
             className={`
               transition-colors duration-200
@@ -144,44 +137,16 @@ const AddIndisciplineModal = ({ visible, onCancel, onSubmit }) => {
                   : 'bg-slate-50 border-slate-300 text-slate-900 placeholder:text-slate-500 hover:border-blue-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30'
               }
             `}
-            rows={4}
           />
         </Form.Item>
 
         <Form.Item
-          name="actionTaken"
-          label={
-            <span className={isDarkMode ? 'text-gray-200' : 'text-gray-700'}>
-              Action Taken
-            </span>
-          }
-          rules={[{ required: true, message: 'Please enter action taken' }]}
-        >
-          <Input.TextArea
-            placeholder="Enter action taken"
-            className={`
-              transition-colors duration-200
-              ${
-                isDarkMode
-                  ? 'bg-gray-700 border-gray-600 text-white placeholder:text-gray-400 hover:border-blue-400 focus:border-blue-400'
-                  : 'bg-slate-50 border-slate-300 text-slate-900 placeholder:text-slate-500 hover:border-blue-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30'
-              }
-            `}
-            rows={4}
-          />
-        </Form.Item>
-
-        <Form.Item
-          name="status"
-          label={
-            <span className={isDarkMode ? 'text-gray-200' : 'text-gray-700'}>
-              Status
-            </span>
-          }
-          rules={[{ required: true, message: 'Please select status' }]}
+          name="severity"
+          label={<span className={isDarkMode ? 'text-gray-200' : 'text-gray-700'}>Severity</span>}
+          rules={[{ required: true, message: 'Please select severity' }]}
         >
           <Select
-            placeholder="Select status"
+            placeholder="Select severity"
             className={`
               h-10 transition-colors duration-200
               ${
@@ -191,21 +156,29 @@ const AddIndisciplineModal = ({ visible, onCancel, onSubmit }) => {
               }
             `}
           >
-            <Option value="Pending">Pending</Option>
-            <Option value="In Progress">In Progress</Option>
-            <Option value="Resolved">Resolved</Option>
+            <Option value="minor">Minor</Option>
+            <Option value="moderate">Moderate</Option>
+            <Option value="severe">Severe</Option>
           </Select>
         </Form.Item>
 
-        <div className="flex justify-end mt-4">
-          <Button
-            type="primary"
-            onClick={handleSubmit}
-            className={`${isDarkMode ? 'bg-blue-500 hover:bg-blue-600' : 'bg-blue-600 hover:bg-blue-700'} border-0`}
-          >
-            Add Case
-          </Button>
-        </div>
+        <Form.Item
+          name="actionTaken"
+          label={<span className={isDarkMode ? 'text-gray-200' : 'text-gray-700'}>Action Taken</span>}
+        >
+          <Input.TextArea
+            rows={4}
+            placeholder="Enter action taken (optional)"
+            className={`
+              transition-colors duration-200
+              ${
+                isDarkMode
+                  ? 'bg-gray-700 border-gray-600 text-white placeholder:text-gray-400 hover:border-blue-400 focus:border-blue-400'
+                  : 'bg-slate-50 border-slate-300 text-slate-900 placeholder:text-slate-500 hover:border-blue-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30'
+              }
+            `}
+          />
+        </Form.Item>
       </Form>
     </Modal>
   );

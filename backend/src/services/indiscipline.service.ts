@@ -5,8 +5,48 @@ import { z } from 'zod';
 
 // Validation schemas
 const UUIDSchema = z.string().uuid();
-const StatusSchema = z.enum(['active', 'resolved', 'deleted']);
+const StatusSchema = z.enum(['active', 'resolved']);
 const SeveritySchema = z.enum(['minor', 'moderate', 'severe']);
+
+const CreateIndisciplineSchema = z.object({
+  studentAdmissionNumber: z.string().min(1),
+  reporterEmail: z.string().email(),
+  incident_date: z.date(),
+  description: z.string().min(1),
+  severity: SeveritySchema,
+  action_taken: z.string().optional()
+});
+
+const UpdateIndisciplineSchema = z.object({
+  studentAdmissionNumber: z.string().min(1).optional(),
+  reporterEmail: z.string().email().optional(),
+  incident_date: z.date().optional(),
+  description: z.string().min(1).optional(),
+  severity: SeveritySchema.optional(),
+  status: StatusSchema.optional(),
+  action_taken: z.string().optional()
+}).refine(data => Object.keys(data).length > 0, {
+  message: "At least one field must be provided for update"
+});
+
+const FilterSchema = z.object({
+  student_id: UUIDSchema.optional(),
+  severity: SeveritySchema.optional(),
+  status: StatusSchema.optional(),
+  startDate: z.date().optional(),
+  endDate: z.date().optional()
+}).refine(
+  data => {
+    if (data.startDate && data.endDate) {
+      return data.endDate >= data.startDate;
+    }
+    return true;
+  },
+  {
+    message: "End date must be after start date",
+    path: ["endDate"]
+  }
+);
 
 interface Indiscipline {
   id: string;
@@ -15,7 +55,7 @@ interface Indiscipline {
   incident_date: Date;
   description: string;
   severity: 'minor' | 'moderate' | 'severe';
-  status: 'active' | 'resolved' | 'deleted';
+  status: 'active' | 'resolved';
   action_taken?: string;
   created_at: Date;
   updated_at: Date;
@@ -37,20 +77,11 @@ export class IndisciplineService {
   }
 
   private validateFilters(filters: IndisciplineFilters) {
-    if (filters.severity) {
-      SeveritySchema.parse(filters.severity);
-    }
-    if (filters.status) {
-      StatusSchema.parse(filters.status);
-    }
-    if (filters.student_id) {
-      UUIDSchema.parse(filters.student_id);
-    }
-    if (filters.startDate) {
-      z.date().parse(filters.startDate);
-    }
-    if (filters.endDate) {
-      z.date().parse(filters.endDate);
+    if (!filters) return;
+    
+    const validationResult = FilterSchema.safeParse(filters);
+    if (!validationResult.success) {
+      throw new Error(`Invalid filters: ${validationResult.error.message}`);
     }
   }
 
@@ -92,6 +123,12 @@ export class IndisciplineService {
     severity: 'minor' | 'moderate' | 'severe';
     action_taken?: string;
   }) {
+    // Validate input data
+    const validationResult = CreateIndisciplineSchema.safeParse(data);
+    if (!validationResult.success) {
+      throw new Error(`Validation failed: ${validationResult.error.message}`);
+    }
+
     const client = await this.db.connect();
     try {
       await client.query('BEGIN');
@@ -129,12 +166,28 @@ export class IndisciplineService {
     incident_date?: Date;
     description?: string;
     severity?: 'minor' | 'moderate' | 'severe';
-    status?: 'active' | 'resolved' | 'deleted';
+    status?: 'active' | 'resolved';
     action_taken?: string;
   }) {
+    // Validate update data
+    const validationResult = UpdateIndisciplineSchema.safeParse(data);
+    if (!validationResult.success) {
+      throw new Error(`Validation failed: ${validationResult.error.message}`);
+    }
+
     const client = await this.db.connect();
     try {
       await client.query('BEGIN');
+
+      // First check if record exists
+      const checkQuery = SQL`
+        SELECT id FROM indiscipline WHERE id = ${id}
+      `;
+      
+      const { rows: [existingRecord] } = await client.query(checkQuery);
+      if (!existingRecord) {
+        throw new Error('Indiscipline record not found');
+      }
       
       const setClause = [];
       const values = [id];
@@ -186,10 +239,10 @@ export class IndisciplineService {
         RETURNING *
       `;
 
-      const { rows: [result] } = await client.query(query, values);
+      const { rows: [result] } = await client.query(query, [...values.slice(1), id]);
       
       if (!result) {
-        throw new Error('Indiscipline record not found');
+        throw new Error('Failed to update record');
       }
 
       await client.query('COMMIT');
@@ -203,30 +256,57 @@ export class IndisciplineService {
     }
   }
 
-  async delete(id: string) {
-    const query = SQL`
-      UPDATE indiscipline
-      SET status = 'deleted', updated_at = CURRENT_TIMESTAMP
-      WHERE id = ${id} AND status != 'deleted'
-      RETURNING *;
-    `;
+  async delete(id: string): Promise<void> {
+    const client = await this.db.connect();
+    try {
+      await client.query('BEGIN');
 
-    const result = await this.db.query(query);
-    return result.rows[0];
+      // First check if the record exists
+      const checkQuery = SQL`
+        SELECT id 
+        FROM indiscipline 
+        WHERE id = ${id}
+      `;
+      
+      const { rows: [existingRecord] } = await client.query(checkQuery);
+      
+      if (!existingRecord) {
+        throw new Error('Indiscipline record not found');
+      }
+
+      const deleteQuery = SQL`
+        DELETE FROM indiscipline
+        WHERE id = ${id}
+      `;
+
+      const result = await this.db.query(deleteQuery);
+      
+      if (result.rowCount === 0) {
+        throw new Error('Failed to delete record');
+      }
+
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw new Error(`Failed to delete indiscipline record: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      client.release();
+    }
   }
 
   async getById(id: string) {
     const query = SQL`
       SELECT *
       FROM indiscipline
-      WHERE id = ${id} AND status != 'deleted';
+      WHERE id = ${id}
     `;
 
     const result = await this.db.query(query);
-    return result.rows[0];
+    return result.rows[0] || null;
   }
 
   async getAll(filters: IndisciplineFilters = {}) {
+    this.validateFilters(filters);
     try {
       const query = SQL`
         SELECT i.*, 
@@ -247,7 +327,7 @@ export class IndisciplineService {
         query.append(SQL` AND i.severity = ${filters.severity}`);
       }
 
-      if (filters.status) {
+      if (filters.status && (filters.status === 'active' || filters.status === 'resolved')) {
         query.append(SQL` AND i.status = ${filters.status}`);
       }
 
@@ -259,7 +339,7 @@ export class IndisciplineService {
         query.append(SQL` AND i.incident_date <= ${filters.endDate}`);
       }
 
-      query.append(SQL` ORDER BY i.created_at DESC`);
+      query.append(SQL` ORDER BY i.incident_date DESC`);
 
       const { rows } = await this.db.query(query);
       return rows;

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Table, Button, Space } from 'antd';
+import { Table, Button, Space, Tag } from 'antd';
 import { EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import { useWindowSize } from '../../../../../hooks/useWindowSize';
 import { useTheme } from '../../../../../contexts/ThemeContext';
@@ -11,81 +11,74 @@ const IndisciplineListTable = ({ cases, onEdit, onDelete, loading }) => {
   
   const columns = [
     {
-      title: <span key="title-name" className={`font-medium ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>Student Name</span>,
-      dataIndex: 'studentName',
-      key: 'studentName',
-      sorter: (a, b) => a.studentName.localeCompare(b.studentName),
-      render: (text) => <span key={`name-${text}`} className={isDarkMode ? 'text-gray-200' : 'text-gray-700'}>{text}</span>,
+      title: <span className={`font-medium ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>Admission No.</span>,
+      dataIndex: 'studentAdmissionNumber',
+      key: 'studentAdmissionNumber',
+      sorter: (a, b) => a.studentAdmissionNumber.localeCompare(b.studentAdmissionNumber),
+      render: (text) => <span className={isDarkMode ? 'text-gray-200' : 'text-gray-700'}>{text}</span>,
     },
     {
-      title: <span key="title-class" className={`font-medium ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>Class</span>,
-      dataIndex: 'class',
-      key: 'class',
-      render: (text) => <span key={`class-${text}`} className={isDarkMode ? 'text-gray-200' : 'text-gray-700'}>{text}</span>,
+      title: <span className={`font-medium ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>Reporter</span>,
+      dataIndex: 'reporterEmail',
+      key: 'reporterEmail',
+      render: (text) => <span className={isDarkMode ? 'text-gray-200' : 'text-gray-700'}>{text}</span>,
     },
     {
-      title: <span key="title-date" className={`font-medium ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>Incident Date</span>,
-      dataIndex: 'incidentDate',
-      key: 'incidentDate',
+      title: <span className={`font-medium ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>Incident Date</span>,
+      dataIndex: 'incident_date',
+      key: 'incident_date',
+      sorter: (a, b) => moment(a.incident_date).unix() - moment(b.incident_date).unix(),
       render: (date) => (
-        <span key={`date-${date}`} className={isDarkMode ? 'text-gray-200' : 'text-gray-700'}>
+        <span className={isDarkMode ? 'text-gray-200' : 'text-gray-700'}>
           {moment(date).format('YYYY-MM-DD')}
         </span>
       ),
     },
     {
-      title: <span key="title-desc" className={`font-medium ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>Description</span>,
+      title: <span className={`font-medium ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>Description</span>,
       dataIndex: 'description',
       key: 'description',
       ellipsis: true,
-      render: (text) => <span key={`desc-${text}`} className={isDarkMode ? 'text-gray-200' : 'text-gray-700'}>{text}</span>,
+      render: (text) => <span className={isDarkMode ? 'text-gray-200' : 'text-gray-700'}>{text}</span>,
     },
     {
-      title: <span key="title-action" className={`font-medium ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>Action Taken</span>,
-      dataIndex: 'actionTaken',
-      key: 'actionTaken',
+      title: <span className={`font-medium ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>Severity</span>,
+      dataIndex: 'severity',
+      key: 'severity',
+      render: (severity) => {
+        const color = {
+          minor: 'blue',
+          moderate: 'orange',
+          severe: 'red',
+        }[severity.toLowerCase()] || 'default';
+        
+        return <Tag color={color}>{severity.toUpperCase()}</Tag>;
+      },
+    },
+    {
+      title: <span className={`font-medium ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>Action Taken</span>,
+      dataIndex: 'action_taken',
+      key: 'action_taken',
       ellipsis: true,
-      render: (text) => <span key={`action-${text}`} className={isDarkMode ? 'text-gray-200' : 'text-gray-700'}>{text}</span>,
+      render: (text) => <span className={isDarkMode ? 'text-gray-200' : 'text-gray-700'}>{text || '-'}</span>,
     },
     {
-      title: <span key="title-status" className={`font-medium ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>Status</span>,
-      dataIndex: 'status',
-      key: 'status',
-      render: (status) => (
-        <span
-          className={`px-2 py-1 rounded-full text-xs font-medium ${
-            status === 'Resolved'
-              ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
-              : status === 'Pending'
-              ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200'
-              : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
-          }`}
-        >
-          {status}
-        </span>
-      ),
-    },
-    {
-      title: <span key="title-actions" className={`font-medium ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>Actions</span>,
+      title: <span className={`font-medium ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>Actions</span>,
       key: 'actions',
       render: (_, record) => (
         <Space size="middle">
           <Button
-            type="link"
-            icon={<EditOutlined />}
+            type="text"
+            icon={<EditOutlined className={isDarkMode ? 'text-blue-400' : 'text-blue-600'} />}
             onClick={() => onEdit(record)}
-            className={`${isDarkMode ? 'text-blue-400 hover:text-blue-300' : 'text-blue-600 hover:text-blue-500'}`}
-          >
-            Edit
-          </Button>
+            className="hover:bg-transparent"
+          />
           <Button
-            type="link"
-            icon={<DeleteOutlined />}
+            type="text"
+            icon={<DeleteOutlined className={isDarkMode ? 'text-red-400' : 'text-red-600'} />}
             onClick={() => onDelete(record)}
-            className={`${isDarkMode ? 'text-red-400 hover:text-red-300' : 'text-red-600 hover:text-red-500'}`}
-          >
-            Delete
-          </Button>
+            className="hover:bg-transparent"
+          />
         </Space>
       ),
     },
@@ -94,26 +87,24 @@ const IndisciplineListTable = ({ cases, onEdit, onDelete, loading }) => {
   return (
     <div className={`w-full rounded-lg shadow-sm transition-colors duration-200 ${isDarkMode ? 'bg-gray-800' : 'bg-white'}`}>
       <Table
-        columns={columns}
         dataSource={cases}
+        columns={columns}
         loading={loading}
-        rowKey="key"
+        rowKey="id"
         locale={{
-          emptyText: <div key="empty-text" className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>No cases found</div>
+          emptyText: <div className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>No cases found</div>
         }}
         pagination={{
           defaultPageSize: 10,
           showSizeChanger: true,
           showTotal: (total, range) => (
-            <span key="pagination-total" className={isDarkMode ? 'text-gray-300' : 'text-gray-600'}>
+            <span className={isDarkMode ? 'text-gray-300' : 'text-gray-600'}>
               {`${range[0]}-${range[1]} of ${total} items`}
             </span>
           ),
           className: isDarkMode ? 'dark-pagination' : ''
         }}
-        scroll={{
-          x: 'max-content',
-        }}
+        scroll={{ x: true }}
         className={`
           [&_.ant-table]:bg-transparent
           [&_.ant-table-thead>tr>th]:bg-gray-50
