@@ -30,11 +30,11 @@ const UpdateIndisciplineSchema = z.object({
 });
 
 const FilterSchema = z.object({
-  student_id: UUIDSchema.optional(),
   severity: SeveritySchema.optional(),
   status: StatusSchema.optional(),
-  startDate: z.date().optional(),
-  endDate: z.date().optional()
+  startDate: z.string().optional().transform(val => val ? new Date(val) : undefined),
+  endDate: z.string().optional().transform(val => val ? new Date(val) : undefined),
+  studentAdmissionNumber: z.string().optional()
 }).refine(
   data => {
     if (data.startDate && data.endDate) {
@@ -62,11 +62,11 @@ interface Indiscipline {
 }
 
 interface IndisciplineFilters {
-  student_id?: string;
   severity?: string;
   status?: string;
   startDate?: Date;
   endDate?: Date;
+  studentAdmissionNumber?: string;
 }
 
 export class IndisciplineService {
@@ -310,24 +310,23 @@ export class IndisciplineService {
     try {
       const query = SQL`
         SELECT i.*, 
-               s.name as student_name, 
-               s.admission_number,
-               t.name as reporter_name
+               s.admission_number as student_admission_number,
+               t.email as reporter_email
         FROM indiscipline i
         JOIN students s ON i.student_id = s.id
         JOIN teachers t ON i.reported_by = t.id
         WHERE 1=1
       `;
 
-      if (filters.student_id) {
-        query.append(SQL` AND i.student_id = ${filters.student_id}`);
+      if (filters.studentAdmissionNumber) {
+        query.append(SQL` AND s.admission_number = ${filters.studentAdmissionNumber}`);
       }
 
       if (filters.severity) {
         query.append(SQL` AND i.severity = ${filters.severity}`);
       }
 
-      if (filters.status && (filters.status === 'active' || filters.status === 'resolved')) {
+      if (filters.status) {
         query.append(SQL` AND i.status = ${filters.status}`);
       }
 
@@ -342,7 +341,18 @@ export class IndisciplineService {
       query.append(SQL` ORDER BY i.incident_date DESC`);
 
       const { rows } = await this.db.query(query);
-      return rows;
+      return rows.map(row => ({
+        id: row.id,
+        studentAdmissionNumber: row.student_admission_number,
+        reporterEmail: row.reporter_email,
+        incident_date: row.incident_date,
+        description: row.description,
+        severity: row.severity,
+        status: row.status,
+        action_taken: row.action_taken,
+        created_at: row.created_at,
+        updated_at: row.updated_at
+      }));
     } catch (error: any) {
       const message = error instanceof Error ? error.message : 'Failed to get indiscipline records';
       throw new Error(`Failed to get indiscipline records: ${message}`);

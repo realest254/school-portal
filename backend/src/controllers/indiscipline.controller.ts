@@ -41,16 +41,13 @@ export class IndisciplineController {
   delete = async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
-      const result = await this.service.delete(id);
-      
-      if (!result) {
-        logInfo('Indiscipline record not found for deletion', { id });
+      await this.service.delete(id);
+      logInfo('Deleted indiscipline record', { recordId: id });
+      res.status(204).send();
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('not found')) {
         return res.status(404).json({ error: 'Indiscipline record not found' });
       }
-      
-      logInfo('Deleted indiscipline record', { recordId: id });
-      res.json(result);
-    } catch (error) {
       logError(error, 'IndisciplineController.delete');
       res.status(500).json({ error: 'Failed to delete indiscipline record' });
     }
@@ -75,13 +72,31 @@ export class IndisciplineController {
 
   getAll = async (req: Request, res: Response) => {
     try {
-      const filters = {
-        student_id: req.query.student_id as string,
+      // Define the type for our query filters
+      type FilterKeys = 'severity' | 'status' | 'startDate' | 'endDate' | 'studentAdmissionNumber';
+      const queryFilters: Record<FilterKeys, string | undefined> = {
         severity: req.query.severity as string,
         status: req.query.status as string,
-        startDate: req.query.startDate ? new Date(req.query.startDate as string) : undefined,
-        endDate: req.query.endDate ? new Date(req.query.endDate as string) : undefined,
+        startDate: req.query.startDate as string,
+        endDate: req.query.endDate as string,
+        studentAdmissionNumber: req.query.studentAdmissionNumber as string
       };
+
+      // Create a type-safe filter object with date conversion
+      const filters = {
+        severity: queryFilters.severity,
+        status: queryFilters.status,
+        startDate: queryFilters.startDate ? new Date(queryFilters.startDate) : undefined,
+        endDate: queryFilters.endDate ? new Date(queryFilters.endDate) : undefined,
+        studentAdmissionNumber: queryFilters.studentAdmissionNumber
+      };
+      
+      // Remove undefined values using type-safe keys
+      (Object.keys(filters) as Array<keyof typeof filters>).forEach(key => {
+        if (filters[key] === undefined) {
+          delete filters[key];
+        }
+      });
       
       const results = await this.service.getAll(filters);
       res.json(results);
