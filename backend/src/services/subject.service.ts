@@ -84,19 +84,6 @@ export class SubjectService {
 
   async delete(id: string) {
     try {
-      // First check if subject is being used by any teachers
-      const checkQuery = SQL`
-        SELECT EXISTS (
-          SELECT 1 FROM teachers WHERE $1 = ANY(subjects)
-        )
-      `;
-      
-      const { rows: [{ exists }] } = await this.db.query(checkQuery, [id]);
-      
-      if (exists) {
-        throw new Error('Cannot delete subject that is assigned to teachers');
-      }
-
       const query = SQL`
         DELETE FROM subjects
         WHERE id = ${id}

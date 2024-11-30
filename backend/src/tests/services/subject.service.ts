@@ -50,20 +50,22 @@ export class SubjectTestService {
       )
     `);
 
-    // Create teachers table for testing subject deletion constraints
+    // Create teacher_subjects table for testing subject deletion constraints
     await this.db.exec(`
-      CREATE TABLE IF NOT EXISTS teachers (
-        id TEXT PRIMARY KEY,
-        subjects TEXT
+      CREATE TABLE IF NOT EXISTS teacher_subjects (
+        teacher_id TEXT,
+        subject_id TEXT REFERENCES subjects(id) ON DELETE CASCADE,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (teacher_id, subject_id)
       )
     `);
   }
 
   // Helper method for tests to setup test data
-  async __test_insertTeacher(id: string, subjects: string[]) {
+  async __test_insertTeacherSubject(teacherId: string, subjectId: string) {
     await this.db.run(
-      'INSERT INTO teachers (id, subjects) VALUES (?, ?)',
-      [id, JSON.stringify(subjects)]
+      'INSERT INTO teacher_subjects (teacher_id, subject_id) VALUES (?, ?)',
+      [teacherId, subjectId]
     );
   }
 
@@ -133,18 +135,6 @@ export class SubjectTestService {
 
   async delete(id: string): Promise<Subject> {
     try {
-      // First check if subject is being used by any teachers
-      const result = await this.db.get(
-        `SELECT COUNT(*) as count FROM teachers 
-         WHERE json_array_length(json_extract(subjects, '$')) > 0 
-         AND json_extract(subjects, '$') LIKE ?`,
-        [`%${id}%`]
-      );
-      
-      if (result && result.count > 0) {
-        throw new Error('Cannot delete subject that is assigned to teachers');
-      }
-
       const subject = await this.db.get(
         'DELETE FROM subjects WHERE id = ? RETURNING *',
         [id]
@@ -156,8 +146,7 @@ export class SubjectTestService {
 
       return subject;
     } catch (error: any) {
-      if (error.message === 'Subject not found' || 
-          error.message === 'Cannot delete subject that is assigned to teachers') {
+      if (error.message === 'Subject not found') {
         throw error;
       }
       const message = error instanceof Error ? error.message : 'Failed to delete subject';
