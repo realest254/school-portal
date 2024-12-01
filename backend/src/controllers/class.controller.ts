@@ -1,58 +1,180 @@
 import { Request, Response } from 'express';
-import { ClassService } from '../services/class.service';
-import { TeacherService } from '../services/teacher.service';
+import { classService } from '../services/class.service';
 import { logError } from '../utils/logger';
+import { ClassNotFoundError, DuplicateClassError } from '../services/class.service';
+import { ServiceError } from '../types/common.types';
 
 export class ClassController {
-  private static classService = new ClassService();
+    static async createClass(req: Request, res: Response) {
+        try {
+            const { name, grade, stream, academicYear } = req.body;
 
-  static async createClass(req: Request, res: Response) {
-    try {
-      const { name, grade, stream, academicYear, teacherName } = req.body;
+            const newClass = await classService.create({
+                name,
+                grade: Number(grade),
+                stream,
+                academicYear: Number(academicYear)
+            });
 
-      // If teacher name is provided, find the teacher
-      let classTeacherId = null;
-      if (teacherName) {
-        const teacher = await TeacherService.getTeacherByIdentifier({ name: teacherName });
-        if (!teacher) {
-          return res.status(400).json({ error: `Teacher with name "${teacherName}" not found` });
+            return res.status(201).json({
+                success: true,
+                data: newClass,
+                message: 'Class created successfully'
+            });
+        } catch (error: unknown) {
+            logError(error, 'ClassController.createClass');
+            
+            if (error instanceof DuplicateClassError) {
+                return res.status(400).json({
+                    success: false,
+                    error: error.message
+                });
+            }
+
+            if (error instanceof ServiceError) {
+                return res.status(400).json({
+                    success: false,
+                    error: error.message
+                });
+            }
+
+            return res.status(500).json({
+                success: false,
+                error: 'Failed to create class'
+            });
         }
-        classTeacherId = teacher.id;
-      }
-
-      const newClass = await this.classService.create({
-        name,
-        grade,
-        stream,
-        academicYear,
-        classTeacherId
-      });
-
-      res.status(201).json(newClass);
-    } catch (error) {
-      logError(error, 'ClassController.createClass');
-      res.status(500).json({ error: 'Failed to create class' });
     }
-  }
 
-  static async getClasses(req: Request, res: Response) {
-    try {
-      const classes = await this.classService.getAll();
-      res.json(classes);
-    } catch (error) {
-      logError(error, 'ClassController.getClasses');
-      res.status(500).json({ error: 'Failed to get classes' });
-    }
-  }
+    static async getClasses(req: Request, res: Response) {
+        try {
+            const { page, limit, grade, academicYear, isActive } = req.query;
 
-  static async deleteClass(req: Request, res: Response) {
-    try {
-      const { id } = req.params;
-      await this.classService.delete(id);
-      res.status(204).send();
-    } catch (error) {
-      logError(error, 'ClassController.deleteClass');
-      res.status(500).json({ error: 'Failed to delete class' });
+            const filters = {
+                page: page ? Number(page) : undefined,
+                limit: limit ? Number(limit) : undefined,
+                grade: grade ? Number(grade) : undefined,
+                academicYear: academicYear ? Number(academicYear) : undefined,
+                isActive: isActive ? isActive === 'true' : undefined
+            };
+
+            const result = await classService.getAll(filters);
+
+            return res.status(200).json({
+                success: true,
+                ...result
+            });
+        } catch (error: unknown) {
+            logError(error, 'ClassController.getClasses');
+
+            if (error instanceof ServiceError) {
+                return res.status(400).json({
+                    success: false,
+                    error: error.message
+                });
+            }
+
+            return res.status(500).json({
+                success: false,
+                error: 'Failed to get classes'
+            });
+        }
     }
-  }
+
+    static async getClass(req: Request, res: Response) {
+        try {
+            const { id } = req.params;
+            const class_ = await classService.getById(id);
+
+            return res.status(200).json({
+                success: true,
+                data: class_
+            });
+        } catch (error: unknown) {
+            logError(error, 'ClassController.getClass');
+
+            if (error instanceof ClassNotFoundError) {
+                return res.status(404).json({
+                    success: false,
+                    error: error.message
+                });
+            }
+
+            return res.status(500).json({
+                success: false,
+                error: 'Failed to get class'
+            });
+        }
+    }
+
+    static async updateClass(req: Request, res: Response) {
+        try {
+            const { id } = req.params;
+            const { name, grade, stream, academicYear, isActive } = req.body;
+
+            const updatedClass = await classService.update(id, {
+                name,
+                grade: grade ? Number(grade) : undefined,
+                stream,
+                academicYear: academicYear ? Number(academicYear) : undefined,
+                isActive
+            });
+
+            return res.status(200).json({
+                success: true,
+                data: updatedClass,
+                message: 'Class updated successfully'
+            });
+        } catch (error: unknown) {
+            logError(error, 'ClassController.updateClass');
+
+            if (error instanceof ClassNotFoundError) {
+                return res.status(404).json({
+                    success: false,
+                    error: error.message
+                });
+            }
+
+            if (error instanceof DuplicateClassError) {
+                return res.status(400).json({
+                    success: false,
+                    error: error.message
+                });
+            }
+
+            if (error instanceof ServiceError) {
+                return res.status(400).json({
+                    success: false,
+                    error: error.message
+                });
+            }
+
+            return res.status(500).json({
+                success: false,
+                error: 'Failed to update class'
+            });
+        }
+    }
+
+    static async deleteClass(req: Request, res: Response) {
+        try {
+            const { id } = req.params;
+            await classService.delete(id);
+
+            return res.status(204).send();
+        } catch (error: unknown) {
+            logError(error, 'ClassController.deleteClass');
+
+            if (error instanceof ClassNotFoundError) {
+                return res.status(404).json({
+                    success: false,
+                    error: error.message
+                });
+            }
+
+            return res.status(500).json({
+                success: false,
+                error: 'Failed to delete class'
+            });
+        }
+    }
 }

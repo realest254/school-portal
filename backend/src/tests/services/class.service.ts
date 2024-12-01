@@ -4,18 +4,20 @@ import sqlite3 from 'sqlite3';
 import { v4 as uuidv4 } from 'uuid';
 import { 
     ServiceResult, 
-    ServiceError,
-    createUUID
+    ServiceError
 } from '../../types/common.types';
 import { z } from 'zod';
 
 // Validation schemas
-const ClassSchema = z.object({
-    id: z.string().uuid(),
-    name: z.string().min(1),
-    grade: z.number().int().min(1).max(12),
+const ClassInputSchema = z.object({
+    name: z.string().min(1, { message: "Class name cannot be empty" }),
+    grade: z.number().int().min(1, { message: "Grade must be at least 1" }).max(12, { message: "Grade cannot be higher than 12" }),
     stream: z.string().optional(),
-    academicYear: z.number().int().min(2000).max(2100),
+    academicYear: z.number().int().min(2000, { message: "Academic year must be 2000 or later" }).max(2100, { message: "Academic year cannot be after 2100" }),
+});
+
+const ClassSchema = ClassInputSchema.extend({
+    id: z.string().uuid(),
     isActive: z.boolean().default(true),
     createdAt: z.date(),
     updatedAt: z.date()
@@ -138,8 +140,18 @@ export class ClassService {
         try {
             const db = await this.getDatabase();
             
+            // Validate input first
+            const validationResult = ClassInputSchema.safeParse(data);
+            if (!validationResult.success) {
+                throw new ServiceError(
+                    validationResult.error.errors[0].message,
+                    'VALIDATION_ERROR',
+                    400
+                );
+            }
+
             const id = uuidv4();
-            const now = new Date().toISOString();
+            const now = new Date();
 
             const classData = {
                 id,
@@ -149,13 +161,10 @@ export class ClassService {
                 updatedAt: now
             };
 
-            // Validate input
-            ClassSchema.parse(classData);
-
             await db.run(
                 `INSERT INTO classes (id, name, grade, stream, academic_year, is_active, created_at, updated_at)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-                [id, data.name, data.grade, data.stream, data.academicYear, true, now, now]
+                [id, data.name, data.grade, data.stream, data.academicYear, true, now.toISOString(), now.toISOString()]
             );
 
             const newClass = await db.get('SELECT * FROM classes WHERE id = ?', id);
@@ -164,7 +173,14 @@ export class ClassService {
             if (error.code === 'SQLITE_CONSTRAINT') {
                 throw new DuplicateClassError(data.name, data.academicYear);
             }
-            throw error;
+            if (error instanceof ServiceError) {
+                throw error;
+            }
+            throw new ServiceError(
+                'Failed to create class',
+                'INTERNAL_ERROR',
+                500
+            );
         }
     }
 
@@ -221,19 +237,28 @@ export class ClassService {
         }
     }
 
-    async delete(id: string): Promise<ServiceResult<null>> {
+    async delete(id: string): Promise<ServiceResult<boolean>> {
         try {
             const db = await this.getDatabase();
 
-            const result = await db.run('DELETE FROM classes WHERE id = ? RETURNING *', id);
-            
-            if (!result) {
+            // First check if the class exists
+            const existingClass = await db.get('SELECT * FROM classes WHERE id = ?', id);
+            if (!existingClass) {
                 throw new ClassNotFoundError(id);
             }
 
-            return { success: true, data: null };
+            await db.run('DELETE FROM classes WHERE id = ?', id);
+            
+            return { success: true, data: true };
         } catch (error: any) {
-            throw error;
+            if (error instanceof ServiceError) {
+                throw error;
+            }
+            throw new ServiceError(
+                'Failed to delete class',
+                'DELETE_FAILED',
+                500
+            );
         }
     }
 
@@ -268,7 +293,21 @@ export class ClassService {
         }
 
         const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-        const classes = await db.all(`SELECT * FROM classes ${whereClause}`, values);
+        
+        // Add pagination
+        const page = filters.page || 1;
+        const limit = filters.limit || 10;
+        const offset = (page - 1) * limit;
+        
+        const query = `
+            SELECT * FROM classes 
+            ${whereClause} 
+            ORDER BY created_at 
+            LIMIT ? OFFSET ?
+        `;
+        values.push(limit, offset);
+
+        const classes = await db.all(query, values);
 
         return { 
             success: true, 
@@ -277,6 +316,14 @@ export class ClassService {
     }
 
     private mapToClass(row: any): Class {
+        if (!row.created_at || !row.updated_at) {
+            throw new ServiceError(
+                'Invalid class data: missing timestamps',
+                'INVALID_DATA',
+                500
+            );
+        }
+        
         return {
             id: row.id,
             name: row.name,

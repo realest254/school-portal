@@ -215,6 +215,10 @@ export class StudentService {
 
   async getStudentByIdentifier(identifier: GetStudentIdentifier): Promise<ServiceResult<Student>> {
     try {
+      if (!identifier.id && !identifier.studentId && !identifier.email) {
+        throw new Error('At least one identifier (id, studentId, or email) must be provided');
+      }
+
       const query = SQL`
         SELECT 
           s.*,
@@ -222,27 +226,29 @@ export class StudentService {
         FROM students s
         LEFT JOIN class_students cs ON s.id = cs.student_id
         LEFT JOIN classes c ON cs.class_id = c.id
-        WHERE 1=0
+        WHERE 1=1
       `;
 
       if (identifier.id) {
-        query.append(SQL` OR s.id = ${identifier.id}`);
+        query.append(SQL` AND s.id = ${identifier.id}`);
       }
       if (identifier.studentId) {
-        query.append(SQL` OR s.student_id = ${identifier.studentId}`);
+        query.append(SQL` AND s.admission_number = ${identifier.studentId}`);
       }
       if (identifier.email) {
-        query.append(SQL` OR s.email = ${identifier.email}`);
+        query.append(SQL` AND s.email = ${identifier.email}`);
       }
 
       const { rows } = await pool.query(query);
 
       if (rows.length === 0) {
-        throw new StudentNotFoundError(Object.values(identifier)[0]);
+        const identifierValue = identifier.id || identifier.studentId || identifier.email || 'unknown';
+        throw new StudentNotFoundError(identifierValue);
       }
 
       const student = {
         ...rows[0],
+        studentId: rows[0].admission_number, // Map admission_number to studentId
         class: rows[0].class_name
       };
 

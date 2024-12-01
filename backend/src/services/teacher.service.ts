@@ -84,7 +84,6 @@ interface GetTeacherIdentifier {
   id?: string;
   employeeId?: string;
   email?: string;
-  name?: string;
 }
 
 export class TeacherService {
@@ -263,8 +262,8 @@ export class TeacherService {
 
   async getTeacherByIdentifier(identifier: GetTeacherIdentifier): Promise<ServiceResult<TeacherInput>> {
     try {
-      if (!identifier.id && !identifier.employeeId && !identifier.email && !identifier.name) {
-        throw new Error('At least one identifier (id, employeeId, email, or name) must be provided');
+      if (!identifier.id && !identifier.employeeId && !identifier.email) {
+        throw new Error('At least one identifier (id, employeeId, or email) must be provided');
       }
 
       const query = SQL`
@@ -289,29 +288,33 @@ export class TeacherService {
       if (identifier.email) {
         query.append(SQL` AND t.email = ${identifier.email}`);
       }
-      if (identifier.name) {
-        query.append(SQL` AND t.name = ${identifier.name}`);
-      }
 
       query.append(SQL` GROUP BY t.id`);
 
       const { rows } = await pool.query(query);
       if (rows.length === 0) {
-        const identifierValue = identifier.id || identifier.employeeId || identifier.email || identifier.name || 'unknown';
+        const identifierValue = identifier.id || identifier.employeeId || identifier.email || 'unknown';
         throw new TeacherNotFoundError(identifierValue);
       }
 
       const teacher = {
         ...rows[0],
+        employeeId: rows[0].employee_id,
         subjects: rows[0].subjects.filter(Boolean),
         class: rows[0].classes?.filter(Boolean)[0] || null
       };
 
-      return { success: true, data: teacher };
+      return {
+        success: true,
+        data: teacher
+      };
     } catch (error: unknown) {
+      if (error instanceof TeacherNotFoundError) {
+        throw error;
+      }
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-      logError('Error fetching teacher:', errorMessage);
-      throw error;
+      logError('Error fetching teacher by identifier:', errorMessage);
+      throw new ServiceError('Failed to fetch teacher', 'FETCH_ERROR');
     }
   }
 
@@ -590,6 +593,29 @@ export class TeacherService {
       throw error;
     } finally {
       client.release();
+    }
+  }
+
+  /**
+   * Check if a teacher is assigned to a specific class
+   */
+  async isTeacherAssignedToClass(teacherEmail: string, className: string): Promise<boolean> {
+    try {
+      const query = SQL`
+        SELECT COUNT(*) as count
+        FROM class_teachers ct
+        JOIN classes c ON ct.class_id = c.id
+        JOIN teachers t ON ct.teacher_id = t.id
+        WHERE t.email = ${teacherEmail}
+          AND c.name = ${className}
+          AND c.is_active = true
+      `;
+
+      const { rows } = await pool.query(query);
+      return rows[0].count > 0;
+    } catch (error) {
+      logError(error, 'Error checking teacher class assignment');
+      throw new ServiceError('Failed to check teacher class assignment', 'TEACHER_CLASS_CHECK_ERROR');
     }
   }
 }

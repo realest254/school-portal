@@ -5,7 +5,8 @@ import {
     ServiceResult, 
     ServiceError,
     UUID,
-    createUUID
+    createUUID,
+    PaginatedResult
 } from '../types/common.types';
 import { z } from 'zod';
 import { v4 as uuidv4 } from 'uuid';
@@ -48,33 +49,73 @@ interface ClassFilters {
 }
 
 // Error classes specific to the service
-class ClassNotFoundError extends ServiceError {
+export class ClassNotFoundError extends ServiceError {
     constructor(identifier: string) {
         super(`Class not found: ${identifier}`, 'CLASS_NOT_FOUND', 404);
     }
 }
 
-class DuplicateClassError extends ServiceError {
+export class DuplicateClassError extends ServiceError {
     constructor(name: string, academicYear: number) {
         super(`Class with name ${name} already exists for academic year ${academicYear}`, 'DUPLICATE_CLASS', 409);
     }
 }
 
-class ClassHasStudentsError extends ServiceError {
+export class ClassHasStudentsError extends ServiceError {
     constructor(id: string) {
         super(`Cannot delete class that has students assigned to it: ${id}`, 'CLASS_HAS_STUDENTS', 400);
     }
 }
 
 export class ClassService {
+    private static instance: ClassService;
     private db: Pool;
 
-    constructor() {
+    private constructor() {
         this.db = pool;
     }
 
-    async create(data: CreateClassData): Promise<ServiceResult<Class>> {
+    static getInstance(): ClassService {
+        if (!ClassService.instance) {
+            ClassService.instance = new ClassService();
+        }
+        return ClassService.instance;
+    }
+
+    private validateFilters(filters: ClassFilters): void {
+        const filterSchema = z.object({
+            grade: z.number().int().min(1).max(12).optional(),
+            academicYear: z.number().int().min(2000).max(2100).optional(),
+            isActive: z.boolean().optional(),
+            page: z.number().int().min(1).optional(),
+            limit: z.number().int().min(1).optional()
+        });
+
+        const result = filterSchema.safeParse(filters);
+        if (!result.success) {
+            throw new ServiceError(
+                `Invalid filters: ${result.error.errors.map(e => e.message).join(', ')}`,
+                'INVALID_FILTERS'
+            );
+        }
+    }
+
+    async create(data: CreateClassData): Promise<Class> {
         try {
+            const validationResult = ClassSchema.omit({ 
+                id: true, 
+                createdAt: true, 
+                updatedAt: true, 
+                isActive: true 
+            }).safeParse(data);
+
+            if (!validationResult.success) {
+                throw new ServiceError(
+                    `Invalid class data: ${validationResult.error.errors.map(e => e.message).join(', ')}`,
+                    'VALIDATION_ERROR'
+                );
+            }
+
             const id = createUUID(uuidv4());
             const now = new Date();
 
@@ -85,9 +126,6 @@ export class ClassService {
                 createdAt: now,
                 updatedAt: now
             };
-
-            // Validate input
-            ClassSchema.parse(classData);
 
             const query = SQL`
                 INSERT INTO classes (
@@ -101,7 +139,7 @@ export class ClassService {
             `;
 
             const { rows: [newClass] } = await this.db.query(query);
-            return { success: true, data: this.mapToClass(newClass) };
+            return this.mapToClass(newClass);
         } catch (error: any) {
             if (error.code === '23505') {
                 throw new DuplicateClassError(data.name, data.academicYear);
@@ -110,7 +148,7 @@ export class ClassService {
         }
     }
 
-    async update(id: string, data: UpdateClassData): Promise<ServiceResult<Class>> {
+    async update(id: string, data: UpdateClassData): Promise<Class> {
         try {
             const setClause = [];
             const values = [id];
@@ -142,7 +180,7 @@ export class ClassService {
                 if (!existingClass.rows[0]) {
                     throw new ClassNotFoundError(id);
                 }
-                return { success: true, data: this.mapToClass(existingClass.rows[0]) };
+                return this.mapToClass(existingClass.rows[0]);
             }
 
             setClause.push('updated_at = CURRENT_TIMESTAMP');
@@ -160,7 +198,7 @@ export class ClassService {
                 throw new ClassNotFoundError(id);
             }
 
-            return { success: true, data: this.mapToClass(updatedClass) };
+            return this.mapToClass(updatedClass);
         } catch (error: any) {
             if (error.code === '23505') {
                 throw new DuplicateClassError(data.name!, data.academicYear!);
@@ -169,7 +207,7 @@ export class ClassService {
         }
     }
 
-    async delete(id: string): Promise<ServiceResult<null>> {
+    async delete(id: string): Promise<void> {
         try {
             const query = SQL`
                 DELETE FROM classes
@@ -182,14 +220,12 @@ export class ClassService {
             if (!deletedClass) {
                 throw new ClassNotFoundError(id);
             }
-
-            return { success: true, data: null };
         } catch (error: any) {
             throw error;
         }
     }
 
-    async getById(id: string): Promise<ServiceResult<Class>> {
+    async getById(id: string): Promise<Class> {
         try {
             const query = SQL`
                 SELECT *
@@ -203,55 +239,91 @@ export class ClassService {
                 throw new ClassNotFoundError(id);
             }
 
-            return { success: true, data: this.mapToClass(class_) };
+            return this.mapToClass(class_);
         } catch (error: any) {
             throw error;
         }
     }
 
-    async getAll(filters: ClassFilters = {}): Promise<ServiceResult<Class[]>> {
+    async getAll(filters: ClassFilters = {}): Promise<PaginatedResult<Class[]>> {
         try {
+            this.validateFilters(filters);
+
+            // Build main query
             let query = SQL`
                 SELECT *
                 FROM classes
                 WHERE 1=1
             `;
 
+            // Build count query
+            let countQuery = SQL`
+                SELECT COUNT(*) as count
+                FROM classes
+                WHERE 1=1
+            `;
+
+            // Apply filters to both queries
             if (filters.grade) {
-                query.append(SQL` AND grade = ${filters.grade}`);
+                const gradeFilter = SQL` AND grade = ${filters.grade}`;
+                query.append(gradeFilter);
+                countQuery.append(gradeFilter);
             }
             if (filters.academicYear) {
-                query.append(SQL` AND academic_year = ${filters.academicYear}`);
+                const yearFilter = SQL` AND academic_year = ${filters.academicYear}`;
+                query.append(yearFilter);
+                countQuery.append(yearFilter);
             }
             if (filters.isActive !== undefined) {
-                query.append(SQL` AND is_active = ${filters.isActive}`);
+                const activeFilter = SQL` AND is_active = ${filters.isActive}`;
+                query.append(activeFilter);
+                countQuery.append(activeFilter);
             }
 
             query.append(SQL` ORDER BY grade ASC, name ASC`);
 
-            // Add pagination if specified
-            if (filters.page !== undefined && filters.limit !== undefined) {
-                const offset = (filters.page - 1) * filters.limit;
-                query.append(SQL` LIMIT ${filters.limit} OFFSET ${offset}`);
-            }
+            // Get total count first
+            const { rows: [{ count }] } = await this.db.query(countQuery);
 
+            // Add pagination
+            const page = filters.page || 1;
+            const limit = filters.limit || 10;
+            const offset = (page - 1) * limit;
+            query.append(SQL` LIMIT ${limit} OFFSET ${offset}`);
+
+            // Get paginated data
             const { rows } = await this.db.query(query);
-            return { success: true, data: rows.map(this.mapToClass) };
+
+            return {
+                data: rows.map(this.mapToClass),
+                total: parseInt(count),
+                page,
+                limit
+            };
         } catch (error: any) {
             throw error;
         }
     }
 
     private mapToClass(row: any): Class {
-        return {
-            id: row.id,
-            name: row.name,
-            grade: row.grade,
-            stream: row.stream,
-            academicYear: row.academic_year,
-            isActive: Boolean(row.is_active),
-            createdAt: new Date(row.created_at),
-            updatedAt: new Date(row.updated_at)
-        };
+        try {
+            return ClassSchema.parse({
+                id: row.id,
+                name: row.name,
+                grade: Number(row.grade),
+                stream: row.stream,
+                academicYear: Number(row.academic_year),
+                isActive: Boolean(row.is_active),
+                createdAt: new Date(row.created_at),
+                updatedAt: new Date(row.updated_at)
+            });
+        } catch (error) {
+            if (error instanceof Error) {
+                throw new ServiceError(`Invalid class data in database: ${error.message}`, 'INVALID_DATA');
+            }
+            throw new ServiceError('Invalid class data in database', 'INVALID_DATA');
+        }
     }
 }
+
+export const classService = ClassService.getInstance();

@@ -103,6 +103,22 @@ async function testClassService() {
                     grade: 1,
                     academicYear: 2023
                 }
+            },
+            {
+                name: 'Null Values',
+                data: {
+                    name: null,
+                    grade: null,
+                    academicYear: null
+                } as any
+            },
+            {
+                name: 'Undefined Values',
+                data: {
+                    name: undefined,
+                    grade: undefined,
+                    academicYear: undefined
+                } as any
             }
         ];
 
@@ -150,50 +166,135 @@ async function testClassService() {
             console.log('✅ Got expected duplicate class error');
         }
 
-        // Test Case 4: Update Class
-        await logTestStep('Testing class update');
+        // Test Case 4: Update Class with Edge Cases
+        await logTestStep('Testing class updates with edge cases');
         
+        // Test 4.1: Normal update
         const updateResult = await classService.update(newClass.id, {
             name: 'Class 1B',
             stream: 'B',
             isActive: false
         });
         const updatedClass = assertData(updateResult, 'Failed to update class');
-
         console.log('Updated class:', updatedClass);
+
+        // Test 4.2: Update with empty optional fields
+        try {
+            await classService.update(newClass.id, {
+                stream: '',  // Empty optional field
+            });
+            console.log('✅ Successfully updated with empty optional field');
+        } catch (error) {
+            throw new Error('Failed to update with empty optional field');
+        }
+
+        // Test 4.3: Update non-existent class
+        try {
+            await classService.update('non-existent-id', {
+                name: 'Should Fail'
+            });
+            throw new Error('Expected class not found error but got success');
+        } catch (error) {
+            if (!(error instanceof ServiceError) || error.code !== 'CLASS_NOT_FOUND') {
+                throw error;
+            }
+            console.log('✅ Got expected class not found error for update');
+        }
+
         await showTableContents();
 
-        // Test Case 5: Get Class by ID
-        await logTestStep('Testing get class by ID');
+        // Test Case 5: Get Class by ID with Edge Cases
+        await logTestStep('Testing get class by ID with edge cases');
         
+        // Test 5.1: Get existing class
         const getResult = await classService.getById(newClass.id);
         const retrievedClass = assertData(getResult, 'Failed to get class');
         console.log('Retrieved class:', retrievedClass);
 
-        // Test Case 6: Get All Classes with Filters
-        await logTestStep('Testing get all classes with filters');
+        // Test 5.2: Get non-existent class
+        try {
+            await classService.getById('non-existent-id');
+            throw new Error('Expected class not found error but got success');
+        } catch (error) {
+            if (!(error instanceof ServiceError) || error.code !== 'CLASS_NOT_FOUND') {
+                throw error;
+            }
+            console.log('✅ Got expected class not found error for getById');
+        }
+
+        // Test Case 6: Comprehensive Filter Tests
+        await logTestStep('Testing comprehensive filters');
         
-        // Create another class for testing filters
-        await classService.create({
-            name: 'Class 2A',
+        // Create multiple classes for filter testing
+        const classes = [
+            {
+                name: 'Class 2A',
+                grade: 2,
+                stream: 'A',
+                academicYear: 2023
+            },
+            {
+                name: 'Class 3B',
+                grade: 3,
+                stream: 'B',
+                academicYear: 2023
+            },
+            {
+                name: 'Class 2C',
+                grade: 2,
+                stream: 'C',
+                academicYear: 2024
+            }
+        ];
+
+        for (const classData of classes) {
+            await classService.create(classData);
+        }
+
+        // Test 6.1: Filter by grade
+        const gradeFilterResults = await classService.getAll({ grade: 2 });
+        console.log('Classes filtered by grade 2:', gradeFilterResults.data);
+        if (gradeFilterResults.data?.length !== 2) {
+            throw new Error('Expected 2 classes with grade 2');
+        }
+
+        // Test 6.2: Filter by academic year
+        const yearFilterResults = await classService.getAll({ academicYear: 2024 });
+        console.log('Classes in 2024:', yearFilterResults.data);
+        if (yearFilterResults.data?.length !== 1) {
+            throw new Error('Expected 1 class in 2024');
+        }
+
+        // Test 6.3: Multiple filters
+        const multiFilterResults = await classService.getAll({
             grade: 2,
-            stream: 'A',
-            academicYear: 2023
-        });
-
-        const filterResults = await classService.getAll({
-            grade: 1,
             academicYear: 2023,
-            isActive: false
+            isActive: true
         });
-        console.log('Filtered classes:', filterResults.data);
+        console.log('Classes with multiple filters:', multiFilterResults.data);
 
-        // Test Case 7: Delete Class
-        await logTestStep('Testing class deletion');
+        // Test 6.4: Pagination
+        const pagedResults = await classService.getAll({
+            page: 1,
+            limit: 2
+        });
+        console.log('Paginated classes:', pagedResults.data);
+        if (pagedResults.data?.length !== 2) {
+            throw new Error('Expected 2 classes in paginated results');
+        }
+
+        // Test 6.5: Empty filters
+        const noFilterResults = await classService.getAll({});
+        console.log('All classes (no filters):', noFilterResults.data);
+
+        // Test Case 7: Delete Class Edge Cases
+        await logTestStep('Testing class deletion edge cases');
         
+        // Test 7.1: Delete existing class
         const deleteResult = await classService.delete(newClass.id);
         assertData(deleteResult, 'Failed to delete class');
 
+        // Test 7.2: Verify class is deleted
         try {
             await classService.getById(newClass.id);
             throw new Error('Expected class not found error but got success');
@@ -202,6 +303,17 @@ async function testClassService() {
                 throw error;
             }
             console.log('✅ Got expected class not found error after deletion');
+        }
+
+        // Test 7.3: Delete non-existent class
+        try {
+            await classService.delete('non-existent-id');
+            throw new Error('Expected class not found error but got success');
+        } catch (error) {
+            if (!(error instanceof ServiceError) || error.code !== 'CLASS_NOT_FOUND') {
+                throw error;
+            }
+            console.log('✅ Got expected class not found error for delete');
         }
 
         console.log('✅ All tests passed successfully!');
