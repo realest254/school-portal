@@ -1,43 +1,64 @@
 import { Request, Response } from 'express';
+import { validationResult } from 'express-validator';
 import { classService } from '../services/class.service';
 import { logError } from '../utils/logger';
-import { ClassNotFoundError, DuplicateClassError } from '../services/class.service';
+import { UserRole } from '../middlewares/auth.middleware';
 import { ServiceError } from '../types/common.types';
+import { 
+    AuthenticatedRequest, 
+    checkIsAdminOrError 
+} from '../types/auth.types';
+
+interface CreateClassData {
+    name: string;
+    grade: number;
+    stream?: string;
+    academicYear: number;
+}
 
 export class ClassController {
-    static async createClass(req: Request, res: Response) {
+    /**
+     * Create a new class
+     * Access: Admin only
+     */
+    static async createClass(req: AuthenticatedRequest, res: Response) {
         try {
-            const { name, grade, stream, academicYear } = req.body;
+            checkIsAdminOrError(req.user);
 
-            const newClass = await classService.create({
-                name,
-                grade: Number(grade),
-                stream,
-                academicYear: Number(academicYear)
-            });
+            const errors = validationResult(req);
+            if (!errors.isEmpty()) {
+                return res.status(400).json({ 
+                    success: false, 
+                    errors: errors.array() 
+                });
+            }
 
-            return res.status(201).json({
-                success: true,
-                data: newClass,
-                message: 'Class created successfully'
-            });
+            const classData: CreateClassData = {
+                name: req.body.name,
+                grade: Number(req.body.grade),
+                stream: req.body.stream,
+                academicYear: Number(req.body.academicYear)
+            };
+
+            try {
+                const newClass = await classService.create(classData);
+                return res.status(201).json({
+                    success: true,
+                    data: newClass,
+                    message: 'Class created successfully'
+                });
+            } catch (error) {
+                if (error instanceof ServiceError) {
+                    return res.status(400).json({
+                        success: false,
+                        error: error.message
+                    });
+                }
+                throw error;
+            }
         } catch (error: unknown) {
-            logError(error, 'ClassController.createClass');
-            
-            if (error instanceof DuplicateClassError) {
-                return res.status(400).json({
-                    success: false,
-                    error: error.message
-                });
-            }
-
-            if (error instanceof ServiceError) {
-                return res.status(400).json({
-                    success: false,
-                    error: error.message
-                });
-            }
-
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            logError(errorMessage, 'ClassController.createClass');
             return res.status(500).json({
                 success: false,
                 error: 'Failed to create class'
@@ -45,109 +66,136 @@ export class ClassController {
         }
     }
 
-    static async getClasses(req: Request, res: Response) {
+    /**
+     * Get all classes with optional filters
+     * Access: Admin only
+     */
+    static async getAllClasses(req: AuthenticatedRequest, res: Response) {
         try {
-            const { page, limit, grade, academicYear, isActive } = req.query;
+            checkIsAdminOrError(req.user);
 
-            const filters = {
-                page: page ? Number(page) : undefined,
-                limit: limit ? Number(limit) : undefined,
-                grade: grade ? Number(grade) : undefined,
-                academicYear: academicYear ? Number(academicYear) : undefined,
-                isActive: isActive ? isActive === 'true' : undefined
-            };
-
-            const result = await classService.getAll(filters);
-
-            return res.status(200).json({
-                success: true,
-                ...result
-            });
-        } catch (error: unknown) {
-            logError(error, 'ClassController.getClasses');
-
-            if (error instanceof ServiceError) {
-                return res.status(400).json({
-                    success: false,
-                    error: error.message
+            const errors = validationResult(req);
+            if (!errors.isEmpty()) {
+                return res.status(400).json({ 
+                    success: false, 
+                    errors: errors.array() 
                 });
             }
 
+            const { grade, academicYear, isActive, page, limit } = req.query;
+
+            try {
+                const result = await classService.getAll({
+                    grade: grade ? Number(grade) : undefined,
+                    academicYear: academicYear ? Number(academicYear) : undefined,
+                    isActive: isActive ? isActive === 'true' : undefined,
+                    page: page ? Number(page) : undefined,
+                    limit: limit ? Number(limit) : undefined
+                });
+
+                return res.status(200).json({
+                    success: true,
+                    ...result
+                });
+            } catch (error) {
+                if (error instanceof ServiceError) {
+                    return res.status(400).json({
+                        success: false,
+                        error: error.message
+                    });
+                }
+                throw error;
+            }
+        } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            logError(errorMessage, 'ClassController.getAllClasses');
             return res.status(500).json({
                 success: false,
-                error: 'Failed to get classes'
+                error: 'Failed to fetch classes'
             });
         }
     }
 
-    static async getClass(req: Request, res: Response) {
+    /**
+     * Get a class by name
+     * Access: Admin only
+     */
+    static async getClass(req: AuthenticatedRequest, res: Response) {
         try {
-            const { id } = req.params;
-            const class_ = await classService.getById(id);
+            checkIsAdminOrError(req.user);
 
-            return res.status(200).json({
-                success: true,
-                data: class_
-            });
-        } catch (error: unknown) {
-            logError(error, 'ClassController.getClass');
-
-            if (error instanceof ClassNotFoundError) {
-                return res.status(404).json({
-                    success: false,
-                    error: error.message
+            const { name } = req.params;
+            
+            try {
+                const class_ = await classService.getByName(name);
+                return res.status(200).json({
+                    success: true,
+                    data: class_
                 });
+            } catch (error) {
+                if (error instanceof ServiceError) {
+                    return res.status(404).json({
+                        success: false,
+                        error: error.message
+                    });
+                }
+                throw error;
             }
-
+        } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            logError(errorMessage, 'ClassController.getClass');
             return res.status(500).json({
                 success: false,
-                error: 'Failed to get class'
+                error: 'Failed to fetch class'
             });
         }
     }
 
-    static async updateClass(req: Request, res: Response) {
+    /**
+     * Update a class
+     * Access: Admin only
+     */
+    static async updateClass(req: AuthenticatedRequest, res: Response) {
         try {
+            checkIsAdminOrError(req.user);
+
+            const errors = validationResult(req);
+            if (!errors.isEmpty()) {
+                return res.status(400).json({ 
+                    success: false, 
+                    errors: errors.array() 
+                });
+            }
+
             const { id } = req.params;
             const { name, grade, stream, academicYear, isActive } = req.body;
 
-            const updatedClass = await classService.update(id, {
-                name,
-                grade: grade ? Number(grade) : undefined,
-                stream,
-                academicYear: academicYear ? Number(academicYear) : undefined,
-                isActive
-            });
+            try {
+                const updatedClass = await classService.update(id, {
+                    name,
+                    grade: grade ? Number(grade) : undefined,
+                    stream,
+                    academicYear: academicYear ? Number(academicYear) : undefined,
+                    isActive
+                });
 
-            return res.status(200).json({
-                success: true,
-                data: updatedClass,
-                message: 'Class updated successfully'
-            });
+                return res.status(200).json({
+                    success: true,
+                    data: updatedClass,
+                    message: 'Class updated successfully'
+                });
+            } catch (error) {
+                if (error instanceof ServiceError) {
+                    return res.status(400).json({
+                        success: false,
+                        error: error.message
+                    });
+                }
+                throw error;
+            }
         } catch (error: unknown) {
-            logError(error, 'ClassController.updateClass');
-
-            if (error instanceof ClassNotFoundError) {
-                return res.status(404).json({
-                    success: false,
-                    error: error.message
-                });
-            }
-
-            if (error instanceof DuplicateClassError) {
-                return res.status(400).json({
-                    success: false,
-                    error: error.message
-                });
-            }
-
-            if (error instanceof ServiceError) {
-                return res.status(400).json({
-                    success: false,
-                    error: error.message
-                });
-            }
-
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            logError(errorMessage, 'ClassController.updateClass');
             return res.status(500).json({
                 success: false,
                 error: 'Failed to update class'
@@ -155,22 +203,31 @@ export class ClassController {
         }
     }
 
-    static async deleteClass(req: Request, res: Response) {
+    /**
+     * Delete a class
+     * Access: Admin only
+     */
+    static async deleteClass(req: AuthenticatedRequest, res: Response) {
         try {
+            checkIsAdminOrError(req.user);
+
             const { id } = req.params;
-            await classService.delete(id);
-
-            return res.status(204).send();
-        } catch (error: unknown) {
-            logError(error, 'ClassController.deleteClass');
-
-            if (error instanceof ClassNotFoundError) {
-                return res.status(404).json({
-                    success: false,
-                    error: error.message
-                });
+            
+            try {
+                await classService.delete(id);
+                return res.status(204).send();
+            } catch (error) {
+                if (error instanceof ServiceError) {
+                    return res.status(404).json({
+                        success: false,
+                        error: error.message
+                    });
+                }
+                throw error;
             }
-
+        } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            logError(errorMessage, 'ClassController.deleteClass');
             return res.status(500).json({
                 success: false,
                 error: 'Failed to delete class'

@@ -1,31 +1,38 @@
-import { Router } from 'express';
-import { verifyToken, requireRole, UserRole } from '../middlewares/auth.middleware';
+import { Router, RequestHandler } from 'express';
 import { ClassController } from '../controllers/class.controller';
 import { classValidation } from '../validators/admin.validator';
 
 const router = Router();
 
-// Apply authentication middleware
-router.use(verifyToken);
-router.use(requireRole(UserRole.ADMIN));
-
 // Create a class
 router.post(
   '/',
   classValidation.validateCreate,
-  ClassController.createClass
+  ClassController.createClass as RequestHandler
 );
 
 // Get all classes
 router.get(
   '/',
-  ClassController.getClasses
+  ClassController.getAllClasses as RequestHandler
 );
 
-// Delete a class
-router.delete(
+// Get class by name
+router.get(
   '/:name',
-  ClassController.deleteClass
+  ClassController.getClass as RequestHandler
+);
+
+// Update class
+router.put(
+  '/:id',
+  ClassController.updateClass as RequestHandler
+);
+
+// Delete class
+router.delete(
+  '/:id',
+  ClassController.deleteClass as RequestHandler
 );
 
 export default router;
