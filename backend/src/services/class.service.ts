@@ -225,18 +225,19 @@ export class ClassService {
         }
     }
 
-    async getById(id: string): Promise<Class> {
+    async getByName(name: string): Promise<Class> {
         try {
             const query = SQL`
                 SELECT *
                 FROM classes
-                WHERE id = ${id}
+                WHERE name = ${name}
+                AND is_active = true
             `;
 
             const { rows: [class_] } = await this.db.query(query);
             
             if (!class_) {
-                throw new ClassNotFoundError(id);
+                throw new ClassNotFoundError(name);
             }
 
             return this.mapToClass(class_);

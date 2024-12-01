@@ -3,7 +3,7 @@ import { NotificationService } from '../services/notification.service';
 import { UserRole } from '../middlewares/auth.middleware';
 import { NOTIFICATION_DEFAULTS } from '../config';
 import { NotificationError } from '../errors/notification.errors';
-import { logger } from '../utils/logger';
+import logger from '../utils/logger';
 
 export class NotificationController {
   private notificationService: NotificationService;
