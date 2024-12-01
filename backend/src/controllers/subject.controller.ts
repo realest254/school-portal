@@ -1,116 +1,181 @@
 import { Request, Response } from 'express';
+import { validationResult } from 'express-validator';
 import { SubjectService } from '../services/subject.service';
 import { UserRole } from '../middlewares/auth.middleware';
 import { logError } from '../utils/logger';
+import { AuthenticatedRequest, checkIsAdminOrError } from '../types/auth.types';
 
-// Use the built-in Express Request type augmentation
-type AuthenticatedRequest = Request & {
-  user?: {
-    id: string;
-    role: UserRole;
-    email: string;
-  };
-};
+const subjectService = new SubjectService();
 
 export class SubjectController {
-  private subjectService: SubjectService;
-
-  constructor() {
-    this.subjectService = new SubjectService();
-  }
-
-  async createSubject(req: AuthenticatedRequest, res: Response) {
+  /**
+   * Create a new subject
+   * Access: Admin only
+   */
+  static async createSubject(req: AuthenticatedRequest, res: Response) {
     try {
-      // Ensure user is admin
-      if (req.user?.role !== UserRole.ADMIN) {
-        return res.status(403).json({ error: 'Access denied. Admin privileges required.' });
+      checkIsAdminOrError(req.user);
+
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          success: false,
+          errors: errors.array()
+        });
       }
 
-      const subject = await this.subjectService.create(req.body);
-      res.status(201).json(subject);
+      const subject = await subjectService.create(req.body);
+      return res.status(201).json({
+        success: true,
+        message: 'Subject created successfully',
+        data: subject
+      });
     } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-      logError('Error creating subject:', errorMessage);
-      res.status(400).json({ error: errorMessage });
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logError(errorMessage, 'SubjectController.createSubject');
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to create subject'
+      });
     }
   }
 
-  async updateSubject(req: AuthenticatedRequest, res: Response) {
+  /**
+   * Update a subject
+   * Access: Admin only
+   */
+  static async updateSubject(req: AuthenticatedRequest, res: Response) {
     try {
-      // Ensure user is admin
-      if (req.user?.role !== UserRole.ADMIN) {
-        return res.status(403).json({ error: 'Access denied. Admin privileges required.' });
+      checkIsAdminOrError(req.user);
+
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          success: false,
+          errors: errors.array()
+        });
       }
 
       const { id } = req.params;
-      const subject = await this.subjectService.update(id, req.body);
-      res.json(subject);
+      const subject = await subjectService.update(id, req.body);
+      return res.status(200).json({
+        success: true,
+        message: 'Subject updated successfully',
+        data: subject
+      });
     } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-      logError('Error updating subject:', errorMessage);
-      res.status(400).json({ error: errorMessage });
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logError(errorMessage, 'SubjectController.updateSubject');
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to update subject'
+      });
     }
   }
 
-  async deleteSubject(req: AuthenticatedRequest, res: Response) {
+  /**
+   * Get all subjects
+   * Access: All authenticated users
+   */
+  static async getAllSubjects(req: AuthenticatedRequest, res: Response) {
     try {
-      // Ensure user is admin
-      if (req.user?.role !== UserRole.ADMIN) {
-        return res.status(403).json({ error: 'Access denied. Admin privileges required.' });
-      }
-
-      const { id } = req.params;
-      await this.subjectService.delete(id);
-      res.json({ message: 'Subject deleted successfully' });
+      const subjects = await subjectService.getAll();
+      return res.status(200).json({
+        success: true,
+        data: subjects
+      });
     } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-      logError('Error deleting subject:', errorMessage);
-      res.status(400).json({ error: errorMessage });
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logError(errorMessage, 'SubjectController.getAllSubjects');
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to fetch subjects'
+      });
     }
   }
 
-  async getSubject(req: Request, res: Response) {
+  /**
+   * Get a subject by ID
+   * Access: All authenticated users
+   */
+  static async getSubjectById(req: AuthenticatedRequest, res: Response) {
     try {
       const { id } = req.params;
-      const subject = await this.subjectService.getById(id);
+      const subject = await subjectService.getById(id);
       
       if (!subject) {
-        return res.status(404).json({ error: 'Subject not found' });
+        return res.status(404).json({
+          success: false,
+          error: 'Subject not found'
+        });
       }
-      
-      res.json(subject);
+
+      return res.status(200).json({
+        success: true,
+        data: subject
+      });
     } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-      logError('Error fetching subject:', errorMessage);
-      res.status(400).json({ error: errorMessage });
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logError(errorMessage, 'SubjectController.getSubjectById');
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to fetch subject'
+      });
     }
   }
 
-  async getAllSubjects(req: Request, res: Response) {
+  /**
+   * Delete a subject
+   * Access: Admin only
+   */
+  static async deleteSubject(req: AuthenticatedRequest, res: Response) {
     try {
-      const subjects = await this.subjectService.getAll();
-      res.json(subjects);
+      checkIsAdminOrError(req.user);
+
+      const { id } = req.params;
+      await subjectService.delete(id);
+      
+      return res.status(200).json({
+        success: true,
+        message: 'Subject deleted successfully'
+      });
     } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-      logError('Error fetching all subjects:', errorMessage);
-      res.status(400).json({ error: errorMessage });
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logError(errorMessage, 'SubjectController.deleteSubject');
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to delete subject'
+      });
     }
   }
 
-  async searchSubjects(req: Request, res: Response) {
+  /**
+   * Search subjects
+   * Access: All authenticated users
+   */
+  static async searchSubjects(req: AuthenticatedRequest, res: Response) {
     try {
       const { term } = req.query;
       
       if (typeof term !== 'string') {
-        return res.status(400).json({ error: 'Search term must be a string' });
+        return res.status(400).json({
+          success: false,
+          error: 'Search term must be a string'
+        });
       }
 
-      const subjects = await this.subjectService.search(term);
-      res.json(subjects);
+      const subjects = await subjectService.search(term);
+      return res.status(200).json({
+        success: true,
+        data: subjects
+      });
     } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-      logError('Error searching subjects:', errorMessage);
-      res.status(400).json({ error: errorMessage });
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logError(errorMessage, 'SubjectController.searchSubjects');
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to search subjects'
+      });
     }
   }
 }

@@ -11,7 +11,6 @@ import { RequestHandler } from 'express';
 import { AuthenticatedRequest } from '../types/auth.types';
 
 const router = Router();
-const notificationController = new NotificationController();
 
 // Apply authentication middleware to all admin routes
 router.use(verifyToken);
@@ -23,42 +22,41 @@ router.use('/classes', classRoutes);
 // Notification Routes
 router.post(
   '/notifications',
-  notificationValidation.validateCreate,
-  notificationController.create as RequestHandler
+  notificationValidation.create,
+  NotificationController.createNotification as RequestHandler
 );
 
 router.put(
   '/notifications/:id',
-  notificationValidation.validateUpdate,
-  notificationController.update as RequestHandler
+  notificationValidation.update,
+  NotificationController.updateNotification as RequestHandler
 );
 
 router.get(
   '/notifications',
-  notificationValidation.validateGetAll,
-  notificationController.getAll as RequestHandler
+  notificationValidation.getAll,
+  NotificationController.getAllNotifications as RequestHandler
 );
 
 router.get(
   '/notifications/:id',
-  notificationValidation.validateGetById,
-  notificationController.getById as RequestHandler
+  notificationValidation.getById,
+  NotificationController.getNotification as RequestHandler
 );
 
 router.delete(
   '/notifications/:id',
-  notificationValidation.validateDelete,
-  notificationController.delete as RequestHandler
-);
-
-router.get(
-  '/notifications/recipient',
-  notificationValidation.validateGetForRecipient,
-  notificationController.getForRecipient as RequestHandler
+  notificationValidation.delete,
+  NotificationController.deleteNotification as RequestHandler
 );
 
 // Student Routes
-router.get('/students', StudentController.getAllStudents as RequestHandler);
+router.get(
+  '/students',
+  studentValidation.getAll,
+  StudentController.getAllStudents as RequestHandler
+);
+
 router.get('/students/class/:className', StudentController.getStudentsByClass as RequestHandler);
 router.get('/students/:identifier', StudentController.getStudentByIdentifier as RequestHandler);
 router.post('/students', studentValidation.create, StudentController.createStudent as RequestHandler);

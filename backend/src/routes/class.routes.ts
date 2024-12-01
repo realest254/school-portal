@@ -7,7 +7,7 @@ const router = Router();
 // Create a class
 router.post(
   '/',
-  classValidation.validateCreate,
+  classValidation.create,
   ClassController.createClass as RequestHandler
 );
 

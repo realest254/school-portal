@@ -1,364 +1,372 @@
-import { Pool } from 'pg';
-import { UserRole } from '../middlewares/auth.middleware';
-import pool from '../db';
+import pool from '../config/database';
+import { logError, logInfo } from '../utils/logger';
 import SQL from 'sql-template-strings';
 import { z } from 'zod';
-import CacheService from '../cache/cache.service';
+import { v4 } from 'uuid';
+import {
+  UUID,
+  ServiceError,
+  ServiceResult,
+  PaginationParams,
+  PaginatedResult,
+  createUUID,
+} from '../types/common.types';
+import { UserRole } from '../middlewares/auth.middleware';
 
-// Validation schemas
-const UUIDSchema = z.string().uuid();
-const StatusSchema = z.enum(['active', 'expired', 'deleted']);
-const PrioritySchema = z.enum(['low', 'medium', 'high']);
-const TargetAudienceSchema = z.enum(['admin', 'teacher', 'student']);
-
-interface Notification {
-  id: string;
-  title: string;
-  message: string;
-  priority: 'high' | 'medium' | 'low';
-  target_audience: UserRole[];
-  status: 'active' | 'expired' | 'deleted';
-  created_at: Date;
-  expires_at?: Date;
+// Notification-specific error types
+export class NotificationNotFoundError extends ServiceError {
+  constructor(identifier: string) {
+    super(`Notification not found: ${identifier}`, 'NOTIFICATION_NOT_FOUND', 404);
+  }
 }
 
-interface NotificationFilters {
-  priority?: string;
-  status?: string;
-  target_audience?: string;
+// Validation schemas
+const NotificationSchema = z.object({
+  id: z.string().uuid(),
+  title: z.string().min(2).max(200),
+  message: z.string().min(1).max(2000),
+  priority: z.enum(['high', 'medium', 'low']).default('medium'),
+  targetAudience: z.array(z.enum(['admin', 'teacher', 'student'])),
+  status: z.enum(['active', 'expired', 'deleted']).default('active'),
+  createdAt: z.date(),
+  updatedAt: z.date(),
+  scheduledFor: z.date().optional(),
+  expiresAt: z.date().optional()
+});
+
+export type Notification = z.infer<typeof NotificationSchema>;
+
+export interface NotificationFilters extends PaginationParams {
+  priority?: 'high' | 'medium' | 'low';
+  status?: 'active' | 'expired' | 'deleted';
+  targetAudience?: UserRole;
   startDate?: Date;
   endDate?: Date;
 }
 
-class NotificationError extends Error {
-  code: string;
-  status: number;
-  errors: any;
-
-  constructor(message: string, code: string, status: number, errors: any) {
-    super(message);
-    this.code = code;
-    this.status = status;
-    this.errors = errors;
-  }
+export interface CreateNotificationData {
+  title: string;
+  message: string;
+  priority?: 'high' | 'medium' | 'low';
+  targetAudience: UserRole[];
+  scheduledFor?: Date;
+  expiresAt?: Date;
 }
 
-enum NotificationErrorCodes {
-  VALIDATION_ERROR = { code: 'VALIDATION_ERROR', status: 400 },
-  DATABASE_ERROR = { code: 'DATABASE_ERROR', status: 500 },
-  NOT_FOUND = { code: 'NOT_FOUND', status: 404 },
+export interface UpdateNotificationData {
+  title?: string;
+  message?: string;
+  priority?: 'high' | 'medium' | 'low';
+  targetAudience?: UserRole[];
+  status?: 'active' | 'expired' | 'deleted';
+  scheduledFor?: Date;
+  expiresAt?: Date;
 }
 
 export class NotificationService {
-  private db: Pool;
-  private cache: CacheService;
+  private static instance: NotificationService;
+  private constructor() {}
 
-  constructor() {
-    this.db = pool;
-    this.cache = new CacheService();
+  static getInstance(): NotificationService {
+    if (!NotificationService.instance) {
+      NotificationService.instance = new NotificationService();
+    }
+    return NotificationService.instance;
   }
 
-  private validateFilters(filters: NotificationFilters) {
-    if (filters.priority) {
-      PrioritySchema.parse(filters.priority);
+  private validateFilters(filters: NotificationFilters): void {
+    const { priority, status, targetAudience, startDate, endDate, page, limit } = filters;
+    
+    if (priority && !['high', 'medium', 'low'].includes(priority)) {
+      throw new ServiceError('Invalid priority filter', 'INVALID_FILTER', 400);
     }
-    if (filters.status) {
-      StatusSchema.parse(filters.status);
+    
+    if (status && !['active', 'expired', 'deleted'].includes(status)) {
+      throw new ServiceError('Invalid status filter', 'INVALID_FILTER', 400);
     }
-    if (filters.target_audience) {
-      TargetAudienceSchema.parse(filters.target_audience);
+    
+    if (targetAudience && !['admin', 'teacher', 'student'].includes(targetAudience)) {
+      throw new ServiceError('Invalid target audience filter', 'INVALID_FILTER', 400);
     }
-    if (filters.startDate) {
-      z.date().parse(filters.startDate);
+    
+    if (startDate && endDate && startDate > endDate) {
+      throw new ServiceError('Start date cannot be after end date', 'INVALID_FILTER', 400);
     }
-    if (filters.endDate) {
-      z.date().parse(filters.endDate);
+
+    if (page) {
+      z.number().positive().parse(page);
+    }
+    
+    if (limit) {
+      z.number().positive().max(100).parse(limit);
     }
   }
 
-  private validateInputs(data: any, schema: z.ZodSchema) {
+  async getAll(filters: NotificationFilters = {}): Promise<PaginatedResult<Notification[]>> {
     try {
-      return schema.parse(data);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        throw new NotificationError(
-          'Validation failed',
-          NotificationErrorCodes.VALIDATION_ERROR.code,
-          NotificationErrorCodes.VALIDATION_ERROR.status,
-          error.errors
-        );
+      this.validateFilters(filters);
+      
+      const { priority, status, targetAudience, startDate, endDate, page = 1, limit = 10 } = filters;
+      const offset = (page - 1) * limit;
+      
+      const query = SQL`
+        SELECT *
+        FROM notifications
+        WHERE 1=1
+      `;
+      
+      if (priority) {
+        query.append(SQL` AND priority = ${priority}`);
       }
+      
+      if (status) {
+        query.append(SQL` AND status = ${status}`);
+      }
+      
+      if (targetAudience) {
+        query.append(SQL` AND ${targetAudience} = ANY(target_audience)`);
+      }
+      
+      if (startDate) {
+        query.append(SQL` AND created_at >= ${startDate}`);
+      }
+      
+      if (endDate) {
+        query.append(SQL` AND created_at <= ${endDate}`);
+      }
+      
+      query.append(SQL` 
+        ORDER BY created_at DESC
+        LIMIT ${limit} 
+        OFFSET ${offset}
+      `);
+      
+      const countQuery = SQL`
+        SELECT COUNT(*)
+        FROM notifications
+        WHERE 1=1
+      `;
+      
+      // Add the same filters to count query
+      if (priority) countQuery.append(SQL` AND priority = ${priority}`);
+      if (status) countQuery.append(SQL` AND status = ${status}`);
+      if (targetAudience) countQuery.append(SQL` AND ${targetAudience} = ANY(target_audience)`);
+      if (startDate) countQuery.append(SQL` AND created_at >= ${startDate}`);
+      if (endDate) countQuery.append(SQL` AND created_at <= ${endDate}`);
+      
+      const [{ rows }, { rows: countRows }] = await Promise.all([
+        pool.query(query),
+        pool.query(countQuery)
+      ]);
+      
+      const total = parseInt(countRows[0].count);
+      
+      return {
+        data: rows.map(this.mapToNotification),
+        total,
+        page,
+        limit
+      };
+    } catch (error) {
+      logError('Error in getAll notifications', String(error));
       throw error;
     }
   }
 
-  async getAll(
-    page: number,
-    limit: number,
-    filters: NotificationFilters
-  ): Promise<{ notifications: Notification[]; total: number }> {
+  async getById(id: string): Promise<ServiceResult<Notification>> {
     try {
-      // Validate inputs
-      z.number().positive().parse(page);
-      z.number().positive().max(100).parse(limit);
-      this.validateFilters(filters);
-
-      const offset = (page - 1) * limit;
-      const query = SQL`SELECT * FROM notifications WHERE status != 'deleted'`;
-
-      if (filters.priority) {
-        query.append(SQL` AND priority = ${filters.priority}`);
+      const query = SQL`
+        SELECT *
+        FROM notifications
+        WHERE id = ${id}
+      `;
+      
+      const { rows } = await pool.query(query);
+      
+      if (!rows[0]) {
+        throw new NotificationNotFoundError(id);
       }
-
-      if (filters.status) {
-        query.append(SQL` AND status = ${filters.status}`);
-      }
-
-      if (filters.target_audience) {
-        query.append(SQL` AND ${filters.target_audience} = ANY(target_audience)`);
-      }
-
-      if (filters.startDate) {
-        query.append(SQL` AND created_at >= ${filters.startDate}`);
-      }
-
-      if (filters.endDate) {
-        query.append(SQL` AND created_at <= ${filters.endDate}`);
-      }
-
-      // Get total count
-      const countQuery = SQL`SELECT COUNT(*) FROM (${query}) AS count`;
-      const { rows: [{ count }] } = await this.db.query(countQuery);
-
-      // Add pagination
-      query.append(SQL` ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}`);
-      const { rows: notifications } = await this.db.query(query);
-
+      
       return {
-        notifications,
-        total: parseInt(count)
+        success: true,
+        data: this.mapToNotification(rows[0])
       };
-    } catch (error: any) {
-      const message = error instanceof Error ? error.message : 'Failed to get notifications';
-      throw new Error(`Failed to get notifications: ${message}`);
-    }
-  }
-
-  async getById(id: string): Promise<Notification | null> {
-    try {
-      // Try to get from cache first
-      const cached = await this.cache.get<Notification>('single', id);
-      if (cached) {
-        return cached;
-      }
-
-      // Validate UUID
-      UUIDSchema.parse(id);
-
-      const query = SQL`
-        SELECT * FROM notifications 
-        WHERE id = ${id} AND status != 'deleted'
-      `;
-      
-      const { rows: [notification] } = await this.db.query(query);
-      
-      if (notification) {
-        // Cache the result
-        await this.cache.set('single', id, notification);
-      }
-      
-      return notification || null;
     } catch (error) {
-      throw new NotificationError(
-        'Failed to fetch notification',
-        NotificationErrorCodes.DATABASE_ERROR.code,
-        NotificationErrorCodes.DATABASE_ERROR.status,
-        error
-      );
+      logError(`Error getting notification by id: ${id}`, String(error));
+      throw error;
     }
   }
 
-  async getForRecipient(
-    userId: string,
-    role: UserRole,
-    page: number,
-    limit: number
-  ): Promise<{ notifications: Notification[]; total: number }> {
-    const cacheKey = `${userId}:${role}:${page}:${limit}`;
-    try {
-      // Try to get from cache first
-      const cached = await this.cache.get<{ notifications: Notification[]; total: number }>('user', cacheKey);
-      if (cached) {
-        return cached;
-      }
-
-      // Validate inputs
-      UUIDSchema.parse(userId);
-      z.enum(['admin', 'teacher', 'student']).parse(role);
-      z.number().positive().parse(page);
-      z.number().positive().max(100).parse(limit);
-
-      const offset = (page - 1) * limit;
-
-      const query = SQL`
-        SELECT n.*, COUNT(*) OVER() as total
-        FROM notifications n
-        WHERE n.status = 'active'
-        AND n.expires_at > NOW()
-        AND ${role} = ANY(n.target_audience)
-        ORDER BY n.created_at DESC
-        LIMIT ${limit} OFFSET ${offset}
-      `;
-
-      const { rows } = await this.db.query(query);
-      const result = {
-        notifications: rows.map(row => ({ ...row, total: undefined })),
-        total: rows.length > 0 ? Number(rows[0].total) : 0
-      };
-
-      // Cache the result
-      await this.cache.set('user', cacheKey, result);
-      
-      return result;
-    } catch (error) {
-      throw new NotificationError(
-        'Failed to fetch notifications',
-        NotificationErrorCodes.DATABASE_ERROR.code,
-        NotificationErrorCodes.DATABASE_ERROR.status,
-        error
-      );
-    }
-  }
-
-  async create(data: any): Promise<Notification> {
-    const client = await this.db.connect();
+  async create(data: CreateNotificationData): Promise<ServiceResult<Notification>> {
+    const client = await pool.connect();
     try {
       await client.query('BEGIN');
       
-      // Validate input data
-      const CreateNotificationSchema = z.object({
-        title: z.string().min(1, "Title cannot be empty"),
-        message: z.string().min(1, "Message cannot be empty"),
-        priority: PrioritySchema,
-        target_audience: z.array(z.enum(['admin', 'teacher', 'student'])).min(1, "Target audience cannot be empty"),
-        expires_at: z.date().optional()
-      });
-
-      this.validateInputs(data, CreateNotificationSchema);
-
+      const { title, message, priority = 'medium', targetAudience, scheduledFor, expiresAt } = data;
+      const id = createUUID(v4());
+      
       const query = SQL`
         INSERT INTO notifications (
-          title, message, priority, target_audience, expires_at, status
+          id, title, message, priority, target_audience, status, scheduled_for, expires_at, created_at, updated_at
         ) VALUES (
-          ${data.title}, ${data.message}, ${data.priority}, 
-          ${data.target_audience}, ${data.expires_at}, 'active'
-        )
-        RETURNING *
+          ${id}, ${title}, ${message}, ${priority}, ${targetAudience}, 'active', ${scheduledFor}, ${expiresAt}, NOW(), NOW()
+        ) RETURNING *
       `;
-
+      
       const { rows: [notification] } = await client.query(query);
-      await client.query('COMMIT');
-
-      // Invalidate relevant caches
-      await this.cache.invalidatePattern('user');
       
-      return notification;
+      await client.query('COMMIT');
+      
+      logInfo('Created new notification', { id });
+      
+      return {
+        success: true,
+        data: this.mapToNotification(notification)
+      };
     } catch (error) {
       await client.query('ROLLBACK');
-      if (error instanceof NotificationError) {
-        throw error;
+      logError('Error creating notification', String(error));
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async update(id: string, data: UpdateNotificationData): Promise<ServiceResult<Notification>> {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      
+      // Check if notification exists
+      const existingNotification = await this.getById(id);
+      if (!existingNotification.data) {
+        throw new NotificationNotFoundError(id);
       }
-      throw new NotificationError(
-        'Failed to create notification',
-        NotificationErrorCodes.DATABASE_ERROR.code,
-        NotificationErrorCodes.DATABASE_ERROR.status,
-        error
+      
+      const updateFields: string[] = [];
+      const values: any[] = [];
+      let valueIndex = 1;
+      
+      if (data.title) {
+        updateFields.push(`title = $${valueIndex}`);
+        values.push(data.title);
+        valueIndex++;
+      }
+      
+      if (data.message) {
+        updateFields.push(`message = $${valueIndex}`);
+        values.push(data.message);
+        valueIndex++;
+      }
+      
+      if (data.priority) {
+        updateFields.push(`priority = $${valueIndex}`);
+        values.push(data.priority);
+        valueIndex++;
+      }
+      
+      if (data.status) {
+        updateFields.push(`status = $${valueIndex}`);
+        values.push(data.status);
+        valueIndex++;
+      }
+      
+      if (data.targetAudience) {
+        updateFields.push(`target_audience = $${valueIndex}`);
+        values.push(data.targetAudience);
+        valueIndex++;
+      }
+      
+      if (data.scheduledFor) {
+        updateFields.push(`scheduled_for = $${valueIndex}`);
+        values.push(data.scheduledFor);
+        valueIndex++;
+      }
+      
+      if (data.expiresAt) {
+        updateFields.push(`expires_at = $${valueIndex}`);
+        values.push(data.expiresAt);
+        valueIndex++;
+      }
+      
+      updateFields.push(`updated_at = NOW()`);
+      
+      if (updateFields.length > 0) {
+        const updateQuery = `
+          UPDATE notifications 
+          SET ${updateFields.join(', ')}
+          WHERE id = $${valueIndex}
+          RETURNING *
+        `;
+        values.push(id);
+        
+        const { rows: [notification] } = await client.query(updateQuery, values);
+        
+        await client.query('COMMIT');
+        
+        logInfo('Updated notification', { id });
+        
+        return {
+          success: true,
+          data: this.mapToNotification(notification)
+        };
+      }
+      
+      return existingNotification;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      logError(`Error updating notification: ${id}`, String(error));
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async delete(id: string): Promise<ServiceResult<null>> {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      
+      // Check if notification exists
+      await this.getById(id);
+      
+      // Soft delete by updating status
+      await client.query(
+        'UPDATE notifications SET status = $1, updated_at = NOW() WHERE id = $2',
+        ['deleted', id]
       );
-    } finally {
-      client.release();
-    }
-  }
-
-  async update(id: string, data: any): Promise<Notification> {
-    const client = await this.db.connect();
-    try {
-      await client.query('BEGIN');
-
-      const notification = await this.getById(id);
-      if (!notification) {
-        throw new NotificationError(
-          'Notification not found',
-          NotificationErrorCodes.NOT_FOUND.code,
-          NotificationErrorCodes.NOT_FOUND.status
-        );
-      }
-
-      // Validate status transition
-      if (data.status && data.status !== notification.status) {
-        if (notification.status === 'expired' && data.status === 'active') {
-          throw new Error('Cannot reactivate expired notification');
-        }
-      }
-
-      const updateQuery = SQL`
-        UPDATE notifications SET
-          title = COALESCE(${data.title}, title),
-          message = COALESCE(${data.message}, message),
-          priority = COALESCE(${data.priority}, priority),
-          target_audience = COALESCE(${data.target_audience}, target_audience),
-          status = COALESCE(${data.status}, status),
-          expires_at = COALESCE(${data.expires_at}, expires_at),
-          updated_at = NOW()
-        WHERE id = ${id}
-        RETURNING *`;
-
-      const { rows: [notification] } = await client.query(updateQuery);
-      await client.query('COMMIT');
-
-      // Invalidate caches
-      await this.cache.invalidate('single', id);
-      await this.cache.invalidatePattern('user');
-
-      return notification;
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
-  }
-
-  async delete(id: string): Promise<void> {
-    const client = await this.db.connect();
-    try {
-      await client.query('BEGIN');
-
-      const notification = await this.getById(id);
-      if (!notification) {
-        throw new NotificationError(
-          'Notification not found',
-          NotificationErrorCodes.NOT_FOUND.code,
-          NotificationErrorCodes.NOT_FOUND.status
-        );
-      }
-
-      const query = SQL`
-        UPDATE notifications 
-        SET status = 'deleted' 
-        WHERE id = ${id}
-      `;
       
-      await client.query(query);
       await client.query('COMMIT');
-
-      // Invalidate caches
-      await this.cache.invalidate('single', id);
-      await this.cache.invalidatePattern('user');
+      
+      logInfo('Deleted notification', { id });
+      
+      return {
+        success: true,
+        data: null
+      };
     } catch (error) {
       await client.query('ROLLBACK');
+      logError(`Error deleting notification: ${id}`, String(error));
       throw error;
     } finally {
       client.release();
     }
+  }
+
+  private mapToNotification(row: any): Notification {
+    return {
+      id: row.id,
+      title: row.title,
+      message: row.message,
+      priority: row.priority,
+      targetAudience: row.target_audience,
+      status: row.status,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      scheduledFor: row.scheduled_for,
+      expiresAt: row.expires_at
+    };
   }
 }
+
+export const notificationService = NotificationService.getInstance();

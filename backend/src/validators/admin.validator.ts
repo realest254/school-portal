@@ -1,285 +1,319 @@
+import { Request, Response, NextFunction } from 'express';
 import { body, param, query } from 'express-validator';
 import { UserRole } from '../middlewares/auth.middleware';
+import { z } from 'zod';
+
+// Teacher schemas
+const teacherCreateSchema = z.object({
+  name: z.string().min(1).max(100),
+  employeeId: z.string().min(1).max(50),
+  email: z.string().email(),
+  subject: z.string().min(1).max(100),
+  phone: z.string().regex(/^\d{10}$/),
+  joinDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
+});
+
+const teacherUpdateSchema = teacherCreateSchema.partial().extend({
+  status: z.enum(['active', 'inactive']).optional()
+});
 
 export const teacherValidation = {
-  create: [
-    body('name')
-      .trim()
-      .notEmpty()
-      .withMessage('Name is required')
-      .isLength({ max: 100 })
-      .withMessage('Name must be at most 100 characters'),
-    body('employeeId')
-      .trim()
-      .notEmpty()
-      .withMessage('Employee ID is required')
-      .isLength({ max: 50 })
-      .withMessage('Employee ID must be at most 50 characters'),
-    body('email')
-      .trim()
-      .notEmpty()
-      .withMessage('Email is required')
-      .isEmail()
-      .withMessage('Invalid email format')
-      .normalizeEmail(),
-    body('subject')
-      .trim()
-      .notEmpty()
-      .withMessage('Subject is required')
-      .isLength({ max: 100 })
-      .withMessage('Subject must be at most 100 characters'),
-    body('phone')
-      .trim()
-      .notEmpty()
-      .withMessage('Phone number is required')
-      .matches(/^\d{10}$/)
-      .withMessage('Phone number must be 10 digits'),
-    body('joinDate')
-      .trim()
-      .notEmpty()
-      .withMessage('Join date is required')
-      .matches(/^\d{4}-\d{2}-\d{2}$/)
-      .withMessage('Join date must be in YYYY-MM-DD format')
-  ],
-  update: [
-    body('name')
-      .optional()
-      .trim()
-      .isLength({ max: 100 })
-      .withMessage('Name must be at most 100 characters'),
-    body('employeeId')
-      .optional()
-      .trim()
-      .isLength({ max: 50 })
-      .withMessage('Employee ID must be at most 50 characters'),
-    body('email')
-      .optional()
-      .trim()
-      .isEmail()
-      .withMessage('Invalid email format')
-      .normalizeEmail(),
-    body('subject')
-      .optional()
-      .trim()
-      .isLength({ max: 100 })
-      .withMessage('Subject must be at most 100 characters'),
-    body('phone')
-      .optional()
-      .trim()
-      .matches(/^\d{10}$/)
-      .withMessage('Phone number must be 10 digits'),
-    body('joinDate')
-      .optional()
-      .trim()
-      .matches(/^\d{4}-\d{2}-\d{2}$/)
-      .withMessage('Join date must be in YYYY-MM-DD format'),
-    body('status')
-      .optional()
-      .isIn(['active', 'inactive'])
-      .withMessage('Status must be either active or inactive')
-  ]
+  validate: (schema: z.ZodSchema) => (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const data = schema.parse(req.method === 'GET' ? req.query : req.body);
+      if (req.method === 'GET') {
+        req.query = data;
+      } else {
+        req.body = data;
+      }
+      next();
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ error: error.errors });
+      } else {
+        res.status(500).json({ error: 'Validation failed' });
+      }
+    }
+  },
+
+  create: (req: Request, res: Response, next: NextFunction) => {
+    teacherValidation.validate(teacherCreateSchema)(req, res, next);
+  },
+
+  update: (req: Request, res: Response, next: NextFunction) => {
+    teacherValidation.validate(teacherUpdateSchema)(req, res, next);
+  }
 };
+
+// Student schemas
+const studentGetAllSchema = z.object({
+  page: z.string().transform((val) => parseInt(val, 10)).optional(),
+  limit: z.string().transform((val) => parseInt(val, 10)).optional(),
+  search: z.string().optional()
+});
+
+const studentGetByIdSchema = z.object({
+  id: z.string().uuid()
+});
+
+const studentCreateSchema = z.object({
+  email: z.string().email(),
+  fullName: z.string().min(1),
+  grade: z.number().int().min(1).max(12),
+  section: z.string().min(1),
+  guardianPhone: z.string().regex(/^\d{10}$/),
+  address: z.string().optional()
+});
+
+const studentUpdateSchema = studentCreateSchema.partial().extend({
+  status: z.enum(['active', 'inactive']).optional()
+});
 
 export const studentValidation = {
-  getAll: [
-    query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
-    query('limit').optional().isInt({ min: 1 }).withMessage('Limit must be a positive integer'),
-    query('search').optional().isString().withMessage('Search must be a string')
-  ],
-  getById: [
-    param('id').isUUID().withMessage('Valid student ID is required')
-  ],
-  create: [
-    body('email').isEmail().withMessage('Valid email is required'),
-    body('fullName').notEmpty().withMessage('Full name is required'),
-    body('grade').isInt({ min: 1, max: 12 }).withMessage('Valid grade is required'),
-    body('section').notEmpty().withMessage('Section is required'),
-    body('guardianPhone').isMobilePhone('any').withMessage('Valid guardian phone is required'),
-    body('address').optional().isString().withMessage('Address must be a string')
-  ],
-  update: [
-    param('id').isUUID().withMessage('Valid student ID is required'),
-    body('fullName').optional().notEmpty().withMessage('Full name cannot be empty'),
-    body('grade').optional().isInt({ min: 1, max: 12 }).withMessage('Valid grade is required'),
-    body('section').optional().notEmpty().withMessage('Section cannot be empty'),
-    body('guardianPhone').optional().isMobilePhone('any').withMessage('Valid guardian phone is required'),
-    body('address').optional().isString().withMessage('Address must be a string'),
-    body('status').optional().isIn(['active', 'inactive']).withMessage('Invalid status')
-  ],
-  delete: [
-    param('id').isUUID().withMessage('Valid student ID is required')
-  ]
+  validate: (schema: z.ZodSchema) => (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const data = schema.parse(req.method === 'GET' ? req.query : req.body);
+      if (req.method === 'GET') {
+        req.query = data;
+      } else {
+        req.body = data;
+      }
+      next();
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ error: error.errors });
+      } else {
+        res.status(500).json({ error: 'Validation failed' });
+      }
+    }
+  },
+
+  getAll: (req: Request, res: Response, next: NextFunction) => {
+    studentValidation.validate(studentGetAllSchema)(req, res, next);
+  },
+
+  getById: (req: Request, res: Response, next: NextFunction) => {
+    if (!z.string().uuid().safeParse(req.params.id).success) {
+      return res.status(400).json({ error: 'Invalid student ID' });
+    }
+    next();
+  },
+
+  create: (req: Request, res: Response, next: NextFunction) => {
+    studentValidation.validate(studentCreateSchema)(req, res, next);
+  },
+
+  update: (req: Request, res: Response, next: NextFunction) => {
+    studentValidation.validate(studentUpdateSchema)(req, res, next);
+  },
+
+  delete: (req: Request, res: Response, next: NextFunction) => {
+    if (!z.string().uuid().safeParse(req.params.id).success) {
+      return res.status(400).json({ error: 'Invalid student ID' });
+    }
+    next();
+  }
 };
+
+// Stats schemas
+const statsGetStatsSchema = z.object({
+  startDate: z.string().date().optional(),
+  endDate: z.string().date().optional()
+});
 
 export const statsValidation = {
-  getStats: [
-    query('startDate').optional().isDate().withMessage('Valid start date is required'),
-    query('endDate').optional().isDate().withMessage('Valid end date is required')
-  ]
+  validate: (schema: z.ZodSchema) => (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const data = schema.parse(req.method === 'GET' ? req.query : req.body);
+      if (req.method === 'GET') {
+        req.query = data;
+      } else {
+        req.body = data;
+      }
+      next();
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ error: error.errors });
+      } else {
+        res.status(500).json({ error: 'Validation failed' });
+      }
+    }
+  },
+
+  getStats: (req: Request, res: Response, next: NextFunction) => {
+    statsValidation.validate(statsGetStatsSchema)(req, res, next);
+  }
 };
+
+// Notification schemas
+const notificationCreateSchema = z.object({
+  title: z.string().min(2).max(200),
+  message: z.string().min(1).max(2000),
+  priority: z.enum(['high', 'medium', 'low']).default('medium'),
+  target_audience: z.array(z.enum(['admin', 'teacher', 'student'])),
+  expires_at: z.string().transform((val) => new Date(val)).optional()
+});
+
+const notificationUpdateSchema = notificationCreateSchema.partial().extend({
+  status: z.enum(['active', 'expired', 'deleted']).optional()
+});
+
+const notificationFilterSchema = z.object({
+  status: z.enum(['active', 'expired', 'deleted']).optional(),
+  priority: z.enum(['high', 'medium', 'low']).optional(),
+  page: z.string().transform((val) => parseInt(val, 10)).optional(),
+  limit: z.string().transform((val) => parseInt(val, 10)).optional()
+});
 
 export const notificationValidation = {
-  validateCreate: [
-    body('title').isString().trim().notEmpty().withMessage('Title is required'),
-    body('message').isString().trim().notEmpty().withMessage('Message is required'),
-    body('priority')
-      .isIn(['high', 'medium', 'low'])
-      .withMessage('Priority must be high, medium, or low'),
-    body('target_audience')
-      .isArray()
-      .withMessage('Target audience must be an array')
-      .custom((value: string[]) => {
-        const validRoles = Object.values(UserRole);
-        return value.every(role => validRoles.includes(role as UserRole));
-      })
-      .withMessage('Invalid target audience roles'),
-    body('expires_at')
-      .optional()
-      .isISO8601()
-      .withMessage('Expiry date must be a valid date')
-  ],
+  validate: (schema: z.ZodSchema) => (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const data = schema.parse(req.method === 'GET' ? req.query : req.body);
+      if (req.method === 'GET') {
+        req.query = data;
+      } else {
+        req.body = data;
+      }
+      next();
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ error: error.errors });
+      } else {
+        res.status(500).json({ error: 'Validation failed' });
+      }
+    }
+  },
 
-  validateUpdate: [
-    param('id').isUUID().withMessage('Invalid notification ID'),
-    body('title').optional().isString().trim(),
-    body('message').optional().isString().trim(),
-    body('priority')
-      .optional()
-      .isIn(['high', 'medium', 'low'])
-      .withMessage('Priority must be high, medium, or low'),
-    body('target_audience')
-      .optional()
-      .isArray()
-      .withMessage('Target audience must be an array')
-      .custom((value: string[]) => {
-        const validRoles = Object.values(UserRole);
-        return value.every(role => validRoles.includes(role as UserRole));
-      })
-      .withMessage('Invalid target audience roles'),
-    body('expires_at')
-      .optional()
-      .isISO8601()
-      .withMessage('Expiry date must be a valid date'),
-    body('status')
-      .optional()
-      .isIn(['active', 'expired', 'deleted'])
-      .withMessage('Invalid status')
-  ],
+  create: (req: Request, res: Response, next: NextFunction) => {
+    notificationValidation.validate(notificationCreateSchema)(req, res, next);
+  },
 
-  validateGetAll: [
-    query('page').optional().isInt({ min: 1 }).toInt(),
-    query('limit').optional().isInt({ min: 1, max: 100 }).toInt(),
-    query('priority').optional().isIn(['high', 'medium', 'low']),
-    query('status').optional().isIn(['active', 'expired', 'deleted']),
-    query('target_audience')
-      .optional()
-      .custom((value: string) => {
-        return Object.values(UserRole).includes(value as UserRole);
-      })
-      .withMessage('Invalid target audience'),
-    query('startDate').optional().isISO8601(),
-    query('endDate').optional().isISO8601()
-  ],
+  update: (req: Request, res: Response, next: NextFunction) => {
+    notificationValidation.validate(notificationUpdateSchema)(req, res, next);
+  },
 
-  validateGetById: [
-    param('id').isUUID().withMessage('Invalid notification ID')
-  ],
+  getAll: (req: Request, res: Response, next: NextFunction) => {
+    notificationValidation.validate(notificationFilterSchema)(req, res, next);
+  },
 
-  validateDelete: [
-    param('id').isUUID().withMessage('Invalid notification ID')
-  ],
+  getById: (req: Request, res: Response, next: NextFunction) => {
+    if (!z.string().uuid().safeParse(req.params.id).success) {
+      return res.status(400).json({ error: 'Invalid notification ID' });
+    }
+    next();
+  },
 
-  validateGetForRecipient: [
-    query('page').optional().isInt({ min: 1 }).toInt(),
-    query('limit').optional().isInt({ min: 1, max: 100 }).toInt()
-  ]
+  delete: (req: Request, res: Response, next: NextFunction) => {
+    if (!z.string().uuid().safeParse(req.params.id).success) {
+      return res.status(400).json({ error: 'Invalid notification ID' });
+    }
+    next();
+  }
 };
+
+// Class schemas
+const classCreateSchema = z.object({
+  name: z.string().min(1).max(100)
+});
 
 export const classValidation = {
-  validateCreate: [
-    body('name')
-      .trim()
-      .notEmpty()
-      .withMessage('Class name is required')
-      .isLength({ max: 100 })
-      .withMessage('Class name must be at most 100 characters'),
-  ],
+  validate: (schema: z.ZodSchema) => (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const data = schema.parse(req.method === 'GET' ? req.query : req.body);
+      if (req.method === 'GET') {
+        req.query = data;
+      } else {
+        req.body = data;
+      }
+      next();
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ error: error.errors });
+      } else {
+        res.status(500).json({ error: 'Validation failed' });
+      }
+    }
+  },
+
+  create: (req: Request, res: Response, next: NextFunction) => {
+    classValidation.validate(classCreateSchema)(req, res, next);
+  }
 };
+
+// Subject schemas
+const subjectCreateSchema = z.object({
+  name: z.string().min(1).max(100),
+  description: z.string().max(500).optional(),
+  gradeLevel: z.number().int().min(1).max(12).optional()
+});
+
+const subjectUpdateSchema = subjectCreateSchema.partial();
 
 export const subjectValidation = {
-  validateCreate: [
-    body('name')
-      .trim()
-      .notEmpty()
-      .withMessage('Subject name is required')
-      .isLength({ max: 100 })
-      .withMessage('Subject name must be at most 100 characters'),
-    body('description')
-      .optional()
-      .trim()
-      .isLength({ max: 500 })
-      .withMessage('Description must be at most 500 characters'),
-    body('gradeLevel')
-      .optional()
-      .isInt({ min: 1, max: 12 })
-      .withMessage('Grade level must be between 1 and 12')
-  ],
-  validateUpdate: [
-    param('id').isUUID().withMessage('Invalid subject ID'),
-    body('name')
-      .optional()
-      .trim()
-      .isLength({ max: 100 })
-      .withMessage('Subject name must be at most 100 characters'),
-    body('description')
-      .optional()
-      .trim()
-      .isLength({ max: 500 })
-      .withMessage('Description must be at most 500 characters'),
-    body('gradeLevel')
-      .optional()
-      .isInt({ min: 1, max: 12 })
-      .withMessage('Grade level must be between 1 and 12')
-  ]
+  validate: (schema: z.ZodSchema) => (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const data = schema.parse(req.method === 'GET' ? req.query : req.body);
+      if (req.method === 'GET') {
+        req.query = data;
+      } else {
+        req.body = data;
+      }
+      next();
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ error: error.errors });
+      } else {
+        res.status(500).json({ error: 'Validation failed' });
+      }
+    }
+  },
+
+  create: (req: Request, res: Response, next: NextFunction) => {
+    subjectValidation.validate(subjectCreateSchema)(req, res, next);
+  },
+
+  update: (req: Request, res: Response, next: NextFunction) => {
+    subjectValidation.validate(subjectUpdateSchema)(req, res, next);
+  }
 };
 
+// Invite schemas
+const inviteCreateSchema = z.object({
+  email: z.string().email(),
+  role: z.enum(['teacher', 'student', 'admin']),
+  expiresAt: z.string().transform((val) => new Date(val)).optional(),
+  metadata: z.object().optional()
+});
+
+const inviteBulkCreateSchema = z.array(z.object({
+  email: z.string().email(),
+  role: z.enum(['teacher', 'student', 'admin'])
+}));
+
 export const inviteValidation = {
-  validateCreate: [
-    body('email')
-      .trim()
-      .notEmpty()
-      .withMessage('Email is required')
-      .isEmail()
-      .withMessage('Invalid email format')
-      .normalizeEmail(),
-    body('role')
-      .notEmpty()
-      .withMessage('Role is required')
-      .isIn(['teacher', 'student', 'admin'])
-      .withMessage('Invalid role'),
-    body('expiresAt')
-      .optional()
-      .isISO8601()
-      .withMessage('Expiry date must be a valid date'),
-    body('metadata')
-      .optional()
-      .isObject()
-      .withMessage('Metadata must be an object')
-  ],
-  validateBulkCreate: [
-    body('invites')
-      .isArray()
-      .withMessage('Invites must be an array')
-      .custom((invites: any[]) => {
-        return invites.every(invite => {
-          return (
-            invite.email &&
-            typeof invite.email === 'string' &&
-            invite.role &&
-            ['teacher', 'student', 'admin'].includes(invite.role)
-          );
-        });
-      })
-      .withMessage('Invalid invites format')
-  ]
+  validate: (schema: z.ZodSchema) => (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const data = schema.parse(req.method === 'GET' ? req.query : req.body);
+      if (req.method === 'GET') {
+        req.query = data;
+      } else {
+        req.body = data;
+      }
+      next();
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ error: error.errors });
+      } else {
+        res.status(500).json({ error: 'Validation failed' });
+      }
+    }
+  },
+
+  create: (req: Request, res: Response, next: NextFunction) => {
+    inviteValidation.validate(inviteCreateSchema)(req, res, next);
+  },
+
+  bulkCreate: (req: Request, res: Response, next: NextFunction) => {
+    inviteValidation.validate(inviteBulkCreateSchema)(req, res, next);
+  }
 };

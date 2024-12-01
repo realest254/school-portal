@@ -1,30 +1,52 @@
-import { Router } from 'express';
+import { Router, RequestHandler } from 'express';
 import { verifyToken, requireRole, UserRole } from '../middlewares/auth.middleware';
 import { SubjectController } from '../controllers/subject.controller';
+import { subjectValidation } from '../validators/admin.validator';
 
 const router = Router();
-const subjectController = new SubjectController();
 
 // Apply authentication middleware
 router.use(verifyToken);
-router.use(requireRole(UserRole.ADMIN));
 
-// Create a subject
-router.post('/', subjectController.createSubject.bind(subjectController));
+// Create a subject (admin only)
+router.post(
+  '/', 
+  requireRole(UserRole.ADMIN),
+  subjectValidation.create,
+  SubjectController.createSubject as RequestHandler
+);
 
-// Update a subject
-router.put('/:id', subjectController.updateSubject.bind(subjectController));
+// Update a subject (admin only)
+router.put(
+  '/:id', 
+  requireRole(UserRole.ADMIN),
+  subjectValidation.update,
+  SubjectController.updateSubject as RequestHandler
+);
 
-// Delete a subject
-router.delete('/:id', subjectController.deleteSubject.bind(subjectController));
+// Delete a subject (admin only)
+router.delete(
+  '/:id', 
+  requireRole(UserRole.ADMIN),
+  SubjectController.deleteSubject as RequestHandler
+);
 
 // Get a specific subject
-router.get('/:id', subjectController.getSubject.bind(subjectController));
+router.get(
+  '/:id',
+  SubjectController.getSubjectById as RequestHandler
+);
 
 // Get all subjects
-router.get('/', subjectController.getAllSubjects.bind(subjectController));
+router.get(
+  '/',
+  SubjectController.getAllSubjects as RequestHandler
+);
 
 // Search subjects
-router.get('/search', subjectController.searchSubjects.bind(subjectController));
+router.get(
+  '/search',
+  SubjectController.searchSubjects as RequestHandler
+);
 
 export default router;

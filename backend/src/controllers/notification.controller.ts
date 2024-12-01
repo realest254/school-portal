@@ -1,119 +1,186 @@
 import { Request, Response } from 'express';
-import { NotificationService } from '../services/notification.service';
+import { validationResult } from 'express-validator';
+import { notificationService } from '../services/notification.service';
 import { UserRole } from '../middlewares/auth.middleware';
 import { NOTIFICATION_DEFAULTS } from '../config';
-import { NotificationError } from '../errors/notification.errors';
-import logger from '../utils/logger';
+import { ServiceError } from '../types/common.types';
+import { AuthenticatedRequest, checkIsAdminOrError } from '../types/auth.types';
+import { logError } from '../utils/logger';
+
+interface CreateNotificationData {
+  title: string;
+  message: string;
+  type: string;
+  targetAudience: string[];
+  scheduledFor?: Date;
+  expiresAt?: Date;
+}
 
 export class NotificationController {
-  private notificationService: NotificationService;
+  /**
+   * Create a new notification
+   * Access: Admin only
+   */
+  static async createNotification(req: AuthenticatedRequest, res: Response) {
+    try {
+      checkIsAdminOrError(req.user);
 
-  constructor() {
-    this.notificationService = new NotificationService();
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          success: false,
+          errors: errors.array()
+        });
+      }
+
+      const notification = await notificationService.create(req.body);
+
+      return res.status(201).json({
+        success: true,
+        message: 'Notification created successfully',
+        data: notification
+      });
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logError(errorMessage, 'NotificationController.createNotification');
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to create notification'
+      });
+    }
   }
 
-  private handleError(error: any, res: Response) {
-    if (error instanceof NotificationError) {
-      logger.warn(`Notification error: ${error.code} - ${error.message}`, {
-        errorDetails: error.details
+  /**
+   * Update a notification
+   * Access: Admin only
+   */
+  static async updateNotification(req: AuthenticatedRequest, res: Response) {
+    try {
+      checkIsAdminOrError(req.user);
+
+      const { id } = req.params;
+      const notification = await notificationService.update(id, req.body);
+
+      return res.status(200).json({
+        success: true,
+        message: 'Notification updated successfully',
+        data: notification
       });
-      return res.status(error.status).json({
-        error: error.message,
-        code: error.code,
-        details: error.details
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logError(errorMessage, 'NotificationController.updateNotification');
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to update notification'
       });
     }
-
-    logger.error('Unexpected notification error:', error);
-    return res.status(500).json({
-      error: 'An unexpected error occurred',
-      code: 'NOTIFICATION.UNEXPECTED_ERROR'
-    });
   }
 
-  create = async (req: Request, res: Response) => {
+  /**
+   * Delete a notification
+   * Access: Admin only
+   */
+  static async deleteNotification(req: AuthenticatedRequest, res: Response) {
     try {
-      const notification = await this.notificationService.create(req.body);
-      logger.info('Notification created', { id: notification.id });
-      res.status(201).json(notification);
-    } catch (error) {
-      this.handleError(error, res);
-    }
-  };
+      checkIsAdminOrError(req.user);
 
-  update = async (req: Request, res: Response) => {
-    try {
       const { id } = req.params;
-      const notification = await this.notificationService.update(id, req.body);
-      logger.info('Notification updated', { id });
-      res.json(notification);
-    } catch (error) {
-      this.handleError(error, res);
-    }
-  };
+      await notificationService.delete(id);
 
-  delete = async (req: Request, res: Response) => {
+      return res.status(200).json({
+        success: true,
+        message: 'Notification deleted successfully'
+      });
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logError(errorMessage, 'NotificationController.deleteNotification');
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to delete notification'
+      });
+    }
+  }
+
+  /**
+   * Get all notifications with optional filters
+   * Access: Admin only
+   */
+  static async getAllNotifications(req: AuthenticatedRequest, res: Response) {
     try {
+      checkIsAdminOrError(req.user);
+
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          success: false,
+          errors: errors.array()
+        });
+      }
+
+      const { status, page, limit } = req.query;
+      
+      // Validate status if provided
+      let validatedStatus: 'active' | 'expired' | 'deleted' | undefined;
+      if (status) {
+        if (['active', 'expired', 'deleted'].includes(status as string)) {
+          validatedStatus = status as 'active' | 'expired' | 'deleted';
+        } else {
+          return res.status(400).json({
+            success: false,
+            message: "Invalid status value. Must be one of: 'active', 'expired', 'deleted'"
+          });
+        }
+      }
+
+      const result = await notificationService.getAll({
+        status: validatedStatus,
+        page: page ? Number(page) : undefined,
+        limit: limit ? Number(limit) : undefined
+      });
+
+      return res.status(200).json({
+        success: true,
+        ...result
+      });
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logError(errorMessage, 'NotificationController.getAllNotifications');
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to fetch notifications'
+      });
+    }
+  }
+
+  /**
+   * Get a notification by ID
+   * Access: Admin only
+   */
+  static async getNotification(req: AuthenticatedRequest, res: Response) {
+    try {
+      checkIsAdminOrError(req.user);
+
       const { id } = req.params;
-      await this.notificationService.delete(id);
-      logger.info('Notification deleted', { id });
-      res.status(204).send();
-    } catch (error) {
-      this.handleError(error, res);
-    }
-  };
+      const notification = await notificationService.getById(id);
 
-  getAll = async (req: Request, res: Response) => {
-    try {
-      const { page = 1, limit = NOTIFICATION_DEFAULTS.PAGE_SIZE, ...filters } = req.query;
-      const notifications = await this.notificationService.getAll(
-        Number(page),
-        Number(limit),
-        filters
-      );
-      res.json(notifications);
-    } catch (error) {
-      this.handleError(error, res);
-    }
-  };
-
-  getById = async (req: Request, res: Response) => {
-    try {
-      const { id } = req.params;
-      const notification = await this.notificationService.getById(id);
       if (!notification) {
-        throw new NotificationError(
-          'Notification not found',
-          'NOTIFICATION.NOT_FOUND',
-          404
-        );
-      }
-      res.json(notification);
-    } catch (error) {
-      this.handleError(error, res);
-    }
-  };
-
-  getForRecipient = async (req: Request, res: Response) => {
-    try {
-      if (!req.user) {
-        throw new NotificationError(
-          'Authentication required',
-          'NOTIFICATION.UNAUTHORIZED',
-          401
-        );
+        return res.status(404).json({
+          success: false,
+          error: 'Notification not found'
+        });
       }
 
-      const { page = 1, limit = NOTIFICATION_DEFAULTS.PAGE_SIZE } = req.query;
-      const notifications = await this.notificationService.getForRecipient(
-        req.user.id,
-        req.user.role as UserRole,
-        Number(page),
-        Number(limit)
-      );
-      res.json(notifications);
-    } catch (error) {
-      this.handleError(error, res);
+      return res.status(200).json({
+        success: true,
+        data: notification
+      });
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logError(errorMessage, 'NotificationController.getNotification');
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to fetch notification'
+      });
     }
-  };
+  }
 }
