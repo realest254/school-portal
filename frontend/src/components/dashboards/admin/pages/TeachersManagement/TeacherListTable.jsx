@@ -1,9 +1,11 @@
 import React from 'react';
-import { Table, Button, Space } from 'antd';
+import { Table, Button, Space, Typography } from 'antd';
 import { EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import { useWindowSize } from '../../../../../hooks/useWindowSize';
 import { useTheme } from '../../../../../contexts/ThemeContext';
 import dayjs from 'dayjs';
+
+const { Text } = Typography;
 
 const TeacherListTable = ({ teachers, onEdit, onDelete, loading }) => {
   const { width } = useWindowSize();
@@ -17,7 +19,11 @@ const TeacherListTable = ({ teachers, onEdit, onDelete, loading }) => {
         key: 'name',
         className: "name-column",
         sorter: (a, b) => a.name.localeCompare(b.name),
-        render: (text) => <span>{text}</span>,
+        render: (text) => (
+          <Text strong className={isDarkMode ? 'text-gray-200' : 'text-gray-800'}>
+            {text}
+          </Text>
+        ),
       },
       {
         title: <span className={`font-medium ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>Employee ID</span>,
@@ -25,7 +31,11 @@ const TeacherListTable = ({ teachers, onEdit, onDelete, loading }) => {
         key: 'employeeId',
         ellipsis: true,
         responsive: ['sm'],
-        render: (text) => <div className={isDarkMode ? 'text-gray-200' : 'text-gray-700'}>{text}</div>,
+        render: (text) => (
+          <Text className={isDarkMode ? 'text-gray-200' : 'text-gray-600'}>
+            {text}
+          </Text>
+        ),
       },
       {
         title: <span className={`font-medium ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>Email</span>,
@@ -33,7 +43,11 @@ const TeacherListTable = ({ teachers, onEdit, onDelete, loading }) => {
         key: 'email',
         ellipsis: true,
         responsive: ['md'],
-        render: (text) => <div className={isDarkMode ? 'text-gray-200' : 'text-gray-700'}>{text}</div>,
+        render: (text) => (
+          <Text className={isDarkMode ? 'text-gray-200' : 'text-gray-600'}>
+            {text}
+          </Text>
+        ),
       },
       {
         title: <span className={`font-medium ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>Phone</span>,
@@ -41,7 +55,11 @@ const TeacherListTable = ({ teachers, onEdit, onDelete, loading }) => {
         key: 'phone',
         ellipsis: true,
         responsive: ['lg'],
-        render: (text) => <div className={isDarkMode ? 'text-gray-200' : 'text-gray-700'}>{text}</div>,
+        render: (text) => (
+          <Text className={isDarkMode ? 'text-gray-200' : 'text-gray-600'}>
+            {text}
+          </Text>
+        ),
       },
       {
         title: <span className={`font-medium ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>Status</span>,
@@ -49,10 +67,10 @@ const TeacherListTable = ({ teachers, onEdit, onDelete, loading }) => {
         key: 'status',
         responsive: ['md'],
         render: (status) => (
-          <div className={`inline-flex px-2 py-1 rounded-full text-xs font-medium
+          <div className={`inline-flex px-3 py-1 rounded-full text-xs font-semibold
             ${status === 'active' 
-              ? (isDarkMode ? 'bg-green-900/50 text-green-400' : 'bg-green-100 text-green-700')
-              : (isDarkMode ? 'bg-red-900/50 text-red-400' : 'bg-red-100 text-red-700')
+              ? (isDarkMode ? 'bg-green-900/50 text-green-400' : 'bg-green-50 text-green-700 border border-green-200')
+              : (isDarkMode ? 'bg-red-900/50 text-red-400' : 'bg-red-50 text-red-700 border border-red-200')
             }`}
           >
             {status.charAt(0).toUpperCase() + status.slice(1)}
@@ -66,9 +84,9 @@ const TeacherListTable = ({ teachers, onEdit, onDelete, loading }) => {
         ellipsis: true,
         responsive: ['lg'],
         render: (date) => (
-          <div className={isDarkMode ? 'text-gray-200' : 'text-gray-700'}>
+          <Text className={isDarkMode ? 'text-gray-200' : 'text-gray-600'}>
             {dayjs(date).format('YYYY-MM-DD')}
-          </div>
+          </Text>
         ),
       },
       {
@@ -78,9 +96,9 @@ const TeacherListTable = ({ teachers, onEdit, onDelete, loading }) => {
         ellipsis: true,
         responsive: ['xl'],
         render: (subjects) => (
-          <div className={isDarkMode ? 'text-gray-200' : 'text-gray-700'}>
+          <Text className={isDarkMode ? 'text-gray-200' : 'text-gray-600'}>
             {subjects?.map(s => s.name).join(', ') || 'No subjects'}
-          </div>
+          </Text>
         ),
       },
       {
@@ -93,56 +111,52 @@ const TeacherListTable = ({ teachers, onEdit, onDelete, loading }) => {
               type="text"
               icon={<EditOutlined />}
               onClick={() => onEdit(record)}
-              className={`${isDarkMode ? 'text-blue-400 hover:text-blue-300' : 'text-blue-500 hover:text-blue-600'}`}
+              className={`${isDarkMode ? 'text-blue-400 hover:text-blue-300' : 'text-blue-600 hover:text-blue-700'}`}
             />
             <Button
               type="text"
               icon={<DeleteOutlined />}
               onClick={() => onDelete(record)}
-              className={`${isDarkMode ? 'text-red-400 hover:text-red-300' : 'text-red-500 hover:text-red-600'}`}
+              className={`${isDarkMode ? 'text-red-400 hover:text-red-300' : 'text-red-600 hover:text-red-700'}`}
             />
           </Space>
         ),
       },
     ];
+
     return baseColumns;
   };
 
   return (
-    <div className={`w-full rounded-lg shadow-sm transition-colors duration-200 ${isDarkMode ? 'bg-gray-800' : 'bg-white'}`}>
-      <Table
-        columns={getResponsiveColumns()}
-        dataSource={teachers}
-        rowKey={record => record.id}
-        loading={loading}
-        locale={{
-          emptyText: <div className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>No teachers found</div>
-        }}
-        pagination={{
-          defaultPageSize: 10,
-          showSizeChanger: true,
-          showTotal: (total, range) => (
-            <span className={isDarkMode ? 'text-gray-300' : 'text-gray-600'}>
-              {range[0]}-{range[1]} of {total} teachers
-            </span>
-          ),
-        }}
-        className={`
-          [&_.ant-table]:!bg-transparent
-          [&_.ant-table-thead>tr>th]:!bg-transparent
-          [&_.ant-table-tbody>tr>td]:!bg-transparent
-          [&_.ant-table-tbody>tr:hover>td]:!bg-transparent
-          ${isDarkMode 
-            ? '[&_.ant-table-thead>tr>th]:!text-gray-300 [&_.ant-pagination-item-link]:!text-gray-400 [&_.ant-pagination-item]:!text-gray-400'
-            : '[&_.ant-table-thead>tr>th]:!text-gray-600'
-          }
-          ${isDarkMode
-            ? '[&_.ant-table-tbody>tr:hover>td]:!bg-gray-700/50'
-            : '[&_.ant-table-tbody>tr:hover>td]:!bg-gray-50'
-          }
-        `}
-      />
-    </div>
+    <Table
+      dataSource={teachers}
+      columns={getResponsiveColumns()}
+      loading={loading}
+      rowKey="id"
+      className={`
+        ${isDarkMode ? 'bg-gray-800' : 'bg-white'}
+        rounded-lg
+        overflow-hidden
+        [&_.ant-table-thead>tr>th]:!bg-transparent
+        [&_.ant-table-thead>tr>th]:!border-b
+        ${isDarkMode 
+          ? '[&_.ant-table-thead>tr>th]:!border-gray-700' 
+          : '[&_.ant-table-thead>tr>th]:!border-gray-100 [&_.ant-table-thead>tr>th]:!bg-gray-50'
+        }
+      `}
+      style={{
+        '--header-bg': isDarkMode ? undefined : '#f8fafc',
+        '--row-hover-bg': isDarkMode ? undefined : '#f1f5f9',
+      }}
+      onRow={(record) => ({
+        className: `
+          transition-colors
+          duration-150
+          ${isDarkMode ? 'hover:bg-gray-700' : 'hover:bg-blue-50/50'}
+          ${isDarkMode ? 'border-gray-700' : 'border-gray-100'}
+        `,
+      })}
+    />
   );
 };
 
