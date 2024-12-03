@@ -23,6 +23,10 @@ function App() {
       <Routes>
         {/* Public route - Login */}
         <Route path="/login" element={<LoginForm />} />
+        <Route path="/unauthorized" element={<Unauthorized />} />
+
+        {/* Root redirect */}
+        <Route path="/" element={<Navigate to="/admin/dashboard" replace />} />
 
         {/* Protected Admin routes */}
         <Route
@@ -54,13 +58,7 @@ function App() {
           }
         />
 
-        {/* Redirect root to login */}
-        <Route path="/" element={<Navigate to="/login" replace />} />
-
-        {/* Unauthorized access page */}
-        <Route path="/unauthorized" element={<Unauthorized />} />
-
-        {/* Catch all other routes and redirect to login */}
+        {/* Catch all route */}
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
     </>

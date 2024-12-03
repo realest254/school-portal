@@ -2,6 +2,11 @@ import { Navigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 
 export function ProtectedRoute({ children, allowedRoles = [] }) {
+  // Temporarily bypass authentication for testing
+  return children;
+
+  // Original authentication logic (commented out)
+  /*
   const { user, userRole, loading } = useAuth()
 
   if (loading) {
@@ -17,4 +22,5 @@ export function ProtectedRoute({ children, allowedRoles = [] }) {
   }
 
   return children
+  */
 }
