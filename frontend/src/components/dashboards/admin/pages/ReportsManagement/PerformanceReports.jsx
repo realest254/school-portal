@@ -1,158 +1,196 @@
-import React, { useState } from 'react';
-import { Form, Select, Button, Space, Divider } from 'antd';
-import { DownloadOutlined, FileExcelOutlined, FilePdfOutlined } from '@ant-design/icons';
+import React, { useState, useEffect } from 'react';
+import { Typography, Spin, Alert, Card, Tabs } from 'antd';
+import { LineChartOutlined, UserOutlined, TeamOutlined, BookOutlined } from '@ant-design/icons';
 import { useTheme } from '../../../../../contexts/ThemeContext';
+import ReportsFilters from './ReportsFilters';
 import PerformanceCharts from './PerformanceCharts';
-import { Bar } from '@ant-design/plots';
+import StudentStats from './StudentStats';
+import TeacherStats from './TeacherStats';
+import ClassStats from './ClassStats';
 
-const { Option } = Select;
+const { Title } = Typography;
 
 const PerformanceReports = () => {
   const { isDarkMode } = useTheme();
-  const [selectedFilters, setSelectedFilters] = useState({
-    gradeLevel: null,
-    class: null,
-    term: null,
-    exam: null,
-    subject: null,
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [data, setData] = useState({
+    overallPerformance: [],
+    subjectPerformance: [],
+    classDistribution: [],
+    studentStats: {},
+    teacherStats: {},
+    classStats: {},
   });
+  const [filters, setFilters] = useState({});
 
-  const [form] = Form.useForm();
+  useEffect(() => {
+    fetchReportData();
+  }, [filters]);
 
-  // Sample data - Replace with actual data from your backend
-  const performanceData = [
-    { subject: 'Mathematics', average: 75 },
-    { subject: 'English', average: 82 },
-    { subject: 'Science', average: 78 },
-    { subject: 'History', average: 85 },
+  const fetchReportData = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      // TODO: Replace with actual API call
+      const response = await new Promise(resolve => 
+        setTimeout(() => resolve({
+          overallPerformance: [
+            { term: 'Term 1', score: 75 },
+            { term: 'Term 2', score: 78 },
+            { term: 'Term 3', score: 82 },
+            { term: 'Term 4', score: 85 },
+          ],
+          subjectPerformance: [
+            { subject: 'Mathematics', score: 82 },
+            { subject: 'English', score: 78 },
+            { subject: 'Science', score: 85 },
+            { subject: 'History', score: 76 },
+            { subject: 'Geography', score: 80 },
+          ],
+          classDistribution: [
+            { class: 'Form 1', students: 120 },
+            { class: 'Form 2', students: 115 },
+            { class: 'Form 3', students: 108 },
+            { class: 'Form 4', students: 105 },
+          ],
+          studentStats: {
+            topPerformers: [],
+            improvementCases: [],
+            attentionNeeded: [],
+          },
+          teacherStats: {
+            performanceByTeacher: [],
+            classesHandled: [],
+            subjectDistribution: [],
+          },
+          classStats: {
+            averagesByClass: [],
+            subjectPerformance: [],
+            attendanceRates: [],
+          },
+        }), 1500)
+      );
+
+      setData(response);
+    } catch (err) {
+      setError('Failed to fetch report data. Please try again later.');
+      console.error('Error fetching report data:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleFilterChange = (newFilter) => {
+    setFilters(prev => ({
+      ...prev,
+      [newFilter.type]: newFilter.value
+    }));
+  };
+
+  const handleExport = () => {
+    // TODO: Implement export functionality
+    console.log('Exporting reports with filters:', filters);
+  };
+
+  const items = [
+    {
+      key: 'overview',
+      label: (
+        <span className="flex items-center gap-2">
+          <LineChartOutlined />
+          Overview
+        </span>
+      ),
+      children: <PerformanceCharts data={data} />,
+    },
+    {
+      key: 'students',
+      label: (
+        <span className="flex items-center gap-2">
+          <UserOutlined />
+          Student Analysis
+        </span>
+      ),
+      children: <StudentStats data={data.studentStats} />,
+    },
+    {
+      key: 'teachers',
+      label: (
+        <span className="flex items-center gap-2">
+          <TeamOutlined />
+          Teacher Analysis
+        </span>
+      ),
+      children: <TeacherStats data={data.teacherStats} />,
+    },
+    {
+      key: 'classes',
+      label: (
+        <span className="flex items-center gap-2">
+          <BookOutlined />
+          Class Analysis
+        </span>
+      ),
+      children: <ClassStats data={data.classStats} />,
+    },
   ];
-
-  const handleFilterChange = (values) => {
-    setSelectedFilters(values);
-    // Here you would typically fetch new data based on the filters
-  };
-
-  const exportToPDF = () => {
-    // Implement PDF export logic
-  };
-
-  const exportToExcel = () => {
-    // Implement Excel export logic
-  };
-
-  const config = {
-    data: performanceData,
-    xField: 'subject',
-    yField: 'average',
-    color: isDarkMode ? '#60A5FA' : '#3B82F6',
-    label: {
-      position: 'middle',
-      style: {
-        fill: isDarkMode ? '#E5E7EB' : '#111827',
-      },
-    },
-    xAxis: {
-      label: {
-        style: {
-          fill: isDarkMode ? '#E5E7EB' : '#111827',
-        },
-      },
-    },
-    yAxis: {
-      label: {
-        style: {
-          fill: isDarkMode ? '#E5E7EB' : '#111827',
-        },
-      },
-    },
-  };
 
   return (
     <div className="space-y-6">
-      <Form
-        form={form}
-        onValuesChange={handleFilterChange}
-        layout="vertical"
-        className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4"
+      <div className="flex flex-col gap-2">
+        <Title 
+          level={4}
+          className={isDarkMode ? 'text-gray-100 mb-0' : 'text-gray-800 mb-0'}
+        >
+          Performance Reports
+        </Title>
+        <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+          Comprehensive analysis of academic performance across students, teachers, and classes
+        </p>
+      </div>
+
+      <ReportsFilters
+        onFilterChange={handleFilterChange}
+        onExport={handleExport}
+        onRefresh={fetchReportData}
+        classes={[]}  // TODO: Add actual data
+        subjects={[]} // TODO: Add actual data
+        teachers={[]} // TODO: Add actual data
+      />
+
+      {error && (
+        <Alert
+          message="Error"
+          description={error}
+          type="error"
+          showIcon
+          className="mb-6"
+        />
+      )}
+
+      <Card
+        className={`
+          border transition-all duration-200
+          ${isDarkMode 
+            ? 'bg-gray-800 border-gray-700' 
+            : 'bg-white border-gray-100'
+          }
+        `}
       >
-        <Form.Item name="gradeLevel" label={
-          <span className={isDarkMode ? 'text-gray-300' : 'text-gray-700'}>Grade Level</span>
-        }>
-          <Select placeholder="Select Grade Level">
-            <Option value="1">Grade 1</Option>
-            <Option value="2">Grade 2</Option>
-            <Option value="3">Grade 3</Option>
-          </Select>
-        </Form.Item>
+        <Tabs
+          items={items}
+          className={isDarkMode ? 'text-gray-100' : ''}
+          animated={{ inkBar: true, tabPane: true }}
+        />
+      </Card>
 
-        <Form.Item name="class" label={
-          <span className={isDarkMode ? 'text-gray-300' : 'text-gray-700'}>Class</span>
-        }>
-          <Select placeholder="Select Class">
-            <Option value="1A">1A</Option>
-            <Option value="1B">1B</Option>
-            <Option value="1C">1C</Option>
-          </Select>
-        </Form.Item>
-
-        <Form.Item name="term" label={
-          <span className={isDarkMode ? 'text-gray-300' : 'text-gray-700'}>Term</span>
-        }>
-          <Select placeholder="Select Term">
-            <Option value="1">Term 1</Option>
-            <Option value="2">Term 2</Option>
-            <Option value="3">Term 3</Option>
-          </Select>
-        </Form.Item>
-
-        <Form.Item name="exam" label={
-          <span className={isDarkMode ? 'text-gray-300' : 'text-gray-700'}>Exam</span>
-        }>
-          <Select placeholder="Select Exam">
-            <Option value="1">Exam 1</Option>
-            <Option value="2">Exam 2</Option>
-            <Option value="3">Exam 3</Option>
-          </Select>
-        </Form.Item>
-
-        <Form.Item name="subject" label={
-          <span className={isDarkMode ? 'text-gray-300' : 'text-gray-700'}>Subject</span>
-        }>
-          <Select placeholder="Select Subject">
-            <Option value="math">Mathematics</Option>
-            <Option value="english">English</Option>
-            <Option value="science">Science</Option>
-          </Select>
-        </Form.Item>
-      </Form>
-
-      <Divider className={isDarkMode ? 'border-gray-700' : 'border-gray-200'} />
-
-      <div className="flex justify-end space-x-4 mb-6">
-        <Button
-          icon={<FilePdfOutlined />}
-          onClick={exportToPDF}
-          className={isDarkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-100'}
-        >
-          Export as PDF
-        </Button>
-        <Button
-          icon={<FileExcelOutlined />}
-          onClick={exportToExcel}
-          className={isDarkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-100'}
-        >
-          Export as Excel
-        </Button>
-      </div>
-
-      <div className={`p-4 rounded-lg ${isDarkMode ? 'bg-gray-900' : 'bg-gray-50'}`}>
-        <h3 className={`text-lg font-medium mb-4 ${isDarkMode ? 'text-gray-100' : 'text-gray-800'}`}>
-          Class Performance Overview
-        </h3>
-        <Bar {...config} />
-      </div>
-
-      <PerformanceCharts filters={selectedFilters} isDarkMode={isDarkMode} />
+      {loading && (
+        <div className="absolute inset-0 bg-black bg-opacity-20 flex items-center justify-center z-50">
+          <Spin size="large" />
+        </div>
+      )}
     </div>
   );
 };

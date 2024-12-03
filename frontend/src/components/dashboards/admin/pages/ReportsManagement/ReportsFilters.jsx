@@ -1,122 +1,141 @@
 import React from 'react';
-import { Form, Input, DatePicker, Button, Space, Select } from 'antd';
-import { SearchOutlined, DownloadOutlined } from '@ant-design/icons';
+import { Card, Select, DatePicker, Button, Space, Typography } from 'antd';
+import { FilterOutlined, ReloadOutlined, DownloadOutlined } from '@ant-design/icons';
 import { useTheme } from '../../../../../contexts/ThemeContext';
 
-const ReportsFilters = ({ onSearch, onExport }) => {
-  const [form] = Form.useForm();
+const { RangePicker } = DatePicker;
+const { Text } = Typography;
+
+const ReportsFilters = ({ 
+  onFilterChange, 
+  onExport,
+  onRefresh,
+  classes = [],
+  subjects = [],
+  teachers = []
+}) => {
   const { isDarkMode } = useTheme();
 
-  const handleSearch = (values) => {
-    // Ensure at least one search criteria is provided
-    const hasSearchCriteria = Object.values(values).some(value => value && value !== '');
-    if (!hasSearchCriteria) {
-      return;
+  const selectClassName = `
+    min-w-[200px]
+    ${isDarkMode 
+      ? 'ant-select-dark' 
+      : ''
     }
-    onSearch(values);
+  `;
+
+  const handleFilterChange = (type, value) => {
+    onFilterChange?.({ type, value });
   };
 
-  const currentYear = new Date().getFullYear();
-  const years = Array.from({ length: 10 }, (_, i) => currentYear - i);
-
   return (
-    <Form
-      form={form}
-      onFinish={handleSearch}
-      className="mb-6"
-      layout="vertical"
+    <Card
+      className={`
+        mb-6 border transition-all duration-200
+        ${isDarkMode 
+          ? 'bg-gray-800 border-gray-700' 
+          : 'bg-white border-gray-100'
+        }
+      `}
     >
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-        {/* Student Filters */}
-        <Form.Item
-          name="studentName"
-          label="Student Name"
-        >
-          <Input placeholder="Enter student name" />
-        </Form.Item>
+      <div className="flex flex-col lg:flex-row lg:items-end gap-4">
+        <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div>
+            <Text 
+              className={`
+                block mb-2 text-sm font-medium
+                ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}
+              `}
+            >
+              Date Range
+            </Text>
+            <RangePicker 
+              className={`w-full ${isDarkMode ? 'ant-picker-dark' : ''}`}
+              onChange={(dates) => handleFilterChange('dateRange', dates)}
+            />
+          </div>
+          
+          <div>
+            <Text 
+              className={`
+                block mb-2 text-sm font-medium
+                ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}
+              `}
+            >
+              Class
+            </Text>
+            <Select
+              className={selectClassName}
+              placeholder="Select class"
+              allowClear
+              onChange={(value) => handleFilterChange('class', value)}
+              options={classes.map(c => ({ label: c.name, value: c.id }))}
+            />
+          </div>
+          
+          <div>
+            <Text 
+              className={`
+                block mb-2 text-sm font-medium
+                ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}
+              `}
+            >
+              Subject
+            </Text>
+            <Select
+              className={selectClassName}
+              placeholder="Select subject"
+              allowClear
+              onChange={(value) => handleFilterChange('subject', value)}
+              options={subjects.map(s => ({ label: s.name, value: s.id }))}
+            />
+          </div>
+          
+          <div>
+            <Text 
+              className={`
+                block mb-2 text-sm font-medium
+                ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}
+              `}
+            >
+              Teacher
+            </Text>
+            <Select
+              className={selectClassName}
+              placeholder="Select teacher"
+              allowClear
+              onChange={(value) => handleFilterChange('teacher', value)}
+              options={teachers.map(t => ({ 
+                label: `${t.firstName} ${t.lastName}`, 
+                value: t.id 
+              }))}
+            />
+          </div>
+        </div>
 
-        <Form.Item
-          name="admissionNumber"
-          label="Admission Number"
-        >
-          <Input placeholder="Enter admission number" />
-        </Form.Item>
-
-        {/* Class Filter */}
-        <Form.Item
-          name="className"
-          label="Class Name"
-        >
-          <Input placeholder="Enter class name" />
-        </Form.Item>
-
-        {/* Teacher Filter */}
-        <Form.Item
-          name="teacherName"
-          label="Teacher Name"
-        >
-          <Input placeholder="Enter teacher name" />
-        </Form.Item>
-
-        {/* Term and Year Filters - Required Group */}
-        <Form.Item
-          label="Academic Year"
-          name="year"
-          rules={[{ required: true, message: 'Year is required' }]}
-        >
-          <Select placeholder="Select year">
-            {years.map(year => (
-              <Select.Option key={year} value={year}>
-                {year}
-              </Select.Option>
-            ))}
-          </Select>
-        </Form.Item>
-
-        <Form.Item
-          label="Term"
-          name="term"
-          rules={[{ required: true, message: 'Term is required' }]}
-        >
-          <Select placeholder="Select term">
-            <Select.Option value="1">Term 1</Select.Option>
-            <Select.Option value="2">Term 2</Select.Option>
-            <Select.Option value="3">Term 3</Select.Option>
-          </Select>
-        </Form.Item>
-
-        {/* Optional Exam Filter */}
-        <Form.Item
-          label="Exam"
-          name="exam"
-        >
-          <Select placeholder="Select exam (optional)">
-            <Select.Option value="1">Exam 1</Select.Option>
-            <Select.Option value="2">Exam 2</Select.Option>
-            <Select.Option value="3">Exam 3</Select.Option>
-            <Select.Option value="final">Final Exam</Select.Option>
-          </Select>
-        </Form.Item>
-      </div>
-
-      <Form.Item>
-        <Space>
+        <Space className="flex-none">
           <Button 
-            type="primary" 
-            htmlType="submit" 
-            icon={<SearchOutlined />}
+            type="default"
+            icon={<ReloadOutlined />}
+            onClick={onRefresh}
+            className={
+              isDarkMode 
+                ? 'border-gray-600 text-gray-300 hover:border-gray-500 hover:text-gray-200' 
+                : ''
+            }
           >
-            Search
+            Refresh
           </Button>
           <Button 
-            onClick={onExport} 
+            type="primary"
             icon={<DownloadOutlined />}
+            onClick={onExport}
           >
-            Export
+            Export Report
           </Button>
         </Space>
-      </Form.Item>
-    </Form>
+      </div>
+    </Card>
   );
 };
 

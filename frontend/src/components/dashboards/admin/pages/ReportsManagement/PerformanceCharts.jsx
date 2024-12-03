@@ -1,105 +1,280 @@
 import React from 'react';
-import { Line, Pie } from '@ant-design/plots';
-import { Card, Row, Col } from 'antd';
+import { Card, Row, Col, Typography } from 'antd';
+import { Line, Column, Pie } from '@ant-design/plots';
+import { useTheme } from '../../../../../contexts/ThemeContext';
 
-const PerformanceCharts = ({ filters, isDarkMode }) => {
-  // Sample data - Replace with actual data from your backend
-  const trendData = [
-    { term: 'Term 1 Exam 1', average: 72 },
-    { term: 'Term 1 Exam 2', average: 75 },
-    { term: 'Term 1 Exam 3', average: 78 },
-    { term: 'Term 2 Exam 1', average: 76 },
-    { term: 'Term 2 Exam 2', average: 80 },
-    { term: 'Term 2 Exam 3', average: 82 },
-  ];
+const { Title } = Typography;
 
-  const distributionData = [
-    { range: '90-100', count: 15 },
-    { range: '80-89', count: 25 },
-    { range: '70-79', count: 35 },
-    { range: '60-69', count: 20 },
-    { range: 'Below 60', count: 5 },
-  ];
+const PerformanceCharts = ({ data }) => {
+  const { isDarkMode } = useTheme();
 
-  const trendConfig = {
-    data: trendData,
+  // Theme configuration for dark mode
+  const theme = {
+    defaultColor: isDarkMode ? '#60A5FA' : '#3B82F6',
+    background: 'transparent',
+    subColor: isDarkMode ? '#FFFFFF' : '#374151',
+    semanticRed: '#F87171',
+    semanticGreen: '#34D399',
+    padding: [20, 20, 20, 20],
+    fontFamily: '-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif',
+  };
+
+  const commonAxisConfig = {
+    grid: {
+      line: {
+        style: {
+          stroke: isDarkMode ? '#4B5563' : '#E5E7EB',
+          lineWidth: 1,
+          lineDash: [4, 5],
+          strokeOpacity: 0.7,
+          cursor: 'pointer'
+        }
+      }
+    },
+    line: {
+      style: {
+        stroke: isDarkMode ? '#6B7280' : '#E5E7EB',
+      }
+    },
+    label: {
+      style: {
+        fill: isDarkMode ? '#D1D5DB' : '#374151',
+        fontSize: 12,
+      },
+    },
+    title: {
+      style: {
+        fill: isDarkMode ? '#F3F4F6' : '#1F2937',
+        fontSize: 13,
+        fontWeight: 600,
+      },
+    },
+    tickLine: {
+      style: {
+        stroke: isDarkMode ? '#6B7280' : '#E5E7EB',
+      },
+    },
+    tick: {
+      style: {
+        fill: isDarkMode ? '#D1D5DB' : '#374151',
+      },
+    },
+  };
+
+  const lineConfig = {
+    data: data.overallPerformance,
     xField: 'term',
-    yField: 'average',
+    yField: 'score',
     smooth: true,
-    color: isDarkMode ? '#60A5FA' : '#3B82F6',
+    theme,
     point: {
-      size: 4,
-      shape: 'circle',
+      size: 5,
+      shape: 'diamond',
       style: {
         fill: isDarkMode ? '#60A5FA' : '#3B82F6',
         stroke: isDarkMode ? '#60A5FA' : '#3B82F6',
         lineWidth: 2,
       },
     },
+    line: {
+      style: {
+        stroke: isDarkMode ? '#60A5FA' : '#3B82F6',
+        lineWidth: 3,
+      },
+    },
     xAxis: {
-      label: {
-        style: {
-          fill: isDarkMode ? '#FFFFFF' : '#111827',
-        },
+      ...commonAxisConfig,
+      title: {
+        text: 'Academic Term',
+        ...commonAxisConfig.title,
       },
     },
     yAxis: {
-      label: {
-        style: {
-          fill: isDarkMode ? '#FFFFFF' : '#111827',
+      ...commonAxisConfig,
+      title: {
+        text: 'Average Score',
+        ...commonAxisConfig.title,
+      },
+    },
+    tooltip: {
+      domStyles: {
+        'g2-tooltip': {
+          backgroundColor: isDarkMode ? '#374151' : '#FFFFFF',
+          color: isDarkMode ? '#F3F4F6' : '#1F2937',
+          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+          border: isDarkMode ? '1px solid #4B5563' : '1px solid #E5E7EB',
+          borderRadius: '6px',
+          padding: '8px 12px',
         },
       },
     },
   };
 
-  const distributionConfig = {
-    data: distributionData,
-    angleField: 'count',
-    colorField: 'range',
-    radius: 0.8,
+  const columnConfig = {
+    data: data.subjectPerformance,
+    xField: 'subject',
+    yField: 'score',
+    theme,
     label: {
-      type: 'outer',
-      content: '{name} {percentage}',
+      position: 'middle',
       style: {
-        fill: isDarkMode ? '#E5E7EB' : '#111827',
+        fill: '#FFFFFF',
+        fontSize: 12,
+        fontWeight: 500,
+        shadowColor: 'rgba(0,0,0,0.2)',
+        shadowBlur: 2,
       },
     },
-    theme: {
-      colors10: isDarkMode 
-        ? ['#60A5FA', '#34D399', '#F472B6', '#FBBF24', '#F87171']
-        : ['#3B82F6', '#10B981', '#EC4899', '#F59E0B', '#EF4444'],
+    xAxis: {
+      ...commonAxisConfig,
+      title: {
+        text: 'Subject',
+        ...commonAxisConfig.title,
+      },
+    },
+    yAxis: {
+      ...commonAxisConfig,
+      title: {
+        text: 'Average Score',
+        ...commonAxisConfig.title,
+      },
+    },
+    columnStyle: {
+      fill: isDarkMode ? '#60A5FA' : '#3B82F6',
+      radius: [4, 4, 0, 0],
+    },
+    tooltip: {
+      domStyles: {
+        'g2-tooltip': {
+          backgroundColor: isDarkMode ? '#374151' : '#FFFFFF',
+          color: isDarkMode ? '#F3F4F6' : '#1F2937',
+          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+          border: isDarkMode ? '1px solid #4B5563' : '1px solid #E5E7EB',
+          borderRadius: '6px',
+          padding: '8px 12px',
+        },
+      },
+    },
+  };
+
+  const pieConfig = {
+    data: data.classDistribution,
+    angleField: 'students',
+    colorField: 'class',
+    theme,
+    radius: 0.8,
+    innerRadius: 0.64,
+    label: {
+      type: 'outer',
+      content: '{name} ({percentage})',
+      style: {
+        fill: isDarkMode ? '#D1D5DB' : '#374151',
+        fontSize: 12,
+        fontWeight: 500,
+      },
+    },
+    legend: {
+      layout: 'horizontal',
+      position: 'bottom',
+      itemName: {
+        style: {
+          fill: isDarkMode ? '#D1D5DB' : '#374151',
+          fontSize: 12,
+        },
+      },
+    },
+    statistic: {
+      title: {
+        style: {
+          color: isDarkMode ? '#F3F4F6' : '#1F2937',
+          fontSize: '14px',
+          lineHeight: '20px',
+        },
+        content: 'Total',
+      },
+      content: {
+        style: {
+          color: isDarkMode ? '#60A5FA' : '#3B82F6',
+          fontSize: '24px',
+          lineHeight: '32px',
+        },
+      },
+    },
+    tooltip: {
+      domStyles: {
+        'g2-tooltip': {
+          backgroundColor: isDarkMode ? '#374151' : '#FFFFFF',
+          color: isDarkMode ? '#F3F4F6' : '#1F2937',
+          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+          border: isDarkMode ? '1px solid #4B5563' : '1px solid #E5E7EB',
+          borderRadius: '6px',
+          padding: '8px 12px',
+        },
+      },
     },
   };
 
   return (
-    <Row gutter={[16, 16]}>
-      <Col span={24}>
-        <Card 
-          title={
-            <span className={`text-base font-medium ${isDarkMode ? 'text-gray-100' : 'text-gray-800'}`}>
-              Performance Trend
-            </span>
+    <div className="space-y-6">
+      <Row gutter={[16, 16]}>
+        <Col xs={24} lg={16}>
+          <Card 
+            title={
+              <Title level={5} className={isDarkMode ? 'text-gray-200 mb-0' : 'mb-0'}>
+                Overall Performance Trend
+              </Title>
+            }
+            className={`
+              h-full border transition-all duration-200
+              ${isDarkMode 
+                ? 'bg-gray-800 border-gray-700' 
+                : 'bg-white border-gray-100'
+              }
+            `}
+            bodyStyle={{ height: 400 }}
+          >
+            <Line {...lineConfig} />
+          </Card>
+        </Col>
+        <Col xs={24} lg={8}>
+          <Card 
+            title={
+              <Title level={5} className={isDarkMode ? 'text-gray-200 mb-0' : 'mb-0'}>
+                Class Distribution
+              </Title>
+            }
+            className={`
+              h-full border transition-all duration-200
+              ${isDarkMode 
+                ? 'bg-gray-800 border-gray-700' 
+                : 'bg-white border-gray-100'
+              }
+            `}
+            bodyStyle={{ height: 400 }}
+          >
+            <Pie {...pieConfig} />
+          </Card>
+        </Col>
+      </Row>
+
+      <Card 
+        title={
+          <Title level={5} className={isDarkMode ? 'text-gray-200 mb-0' : 'mb-0'}>
+            Subject Performance Analysis
+          </Title>
+        }
+        className={`
+          border transition-all duration-200
+          ${isDarkMode 
+            ? 'bg-gray-800 border-gray-700' 
+            : 'bg-white border-gray-100'
           }
-          className={`shadow-sm ${isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}
-        >
-          <Line {...trendConfig} />
-        </Card>
-      </Col>
-      <Col span={24}>
-        <Card 
-          title={
-            <span className={`text-base font-medium ${isDarkMode ? 'text-gray-100' : 'text-gray-800'}`}>
-              Grade Distribution
-            </span>
-          }
-          className={`shadow-sm ${isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}
-        >
-          <div style={{ height: '400px' }}>
-            <Pie {...distributionConfig} />
-          </div>
-        </Card>
-      </Col>
-    </Row>
+        `}
+        bodyStyle={{ height: 400 }}
+      >
+        <Column {...columnConfig} />
+      </Card>
+    </div>
   );
 };
 
