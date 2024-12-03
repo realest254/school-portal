@@ -1,32 +1,27 @@
 import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
-import TeacherDashboard from '../pages/teacher/Dashboard';
+import DashboardLayout from './DashboardLayout';
+import DashboardSidebar from '@/components/shared/DashboardSidebar';
+import DashboardNav from '@/components/shared/DashboardNav';
+
+// Import teacher pages
+import Dashboard from '@/pages/teacher/Dashboard';
 
 const TeacherLayout = () => {
   return (
-    <div className="min-h-screen bg-gray-100">
-      {/* Teacher Navigation */}
-      <nav className="bg-white shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-16">
-            <div className="flex">
-              <div className="flex-shrink-0 flex items-center">
-                <h1 className="text-xl font-bold text-indigo-600">Teacher Portal</h1>
-              </div>
-            </div>
-          </div>
-        </div>
-      </nav>
-
-      {/* Teacher Routes */}
-      <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
-        <Routes>
-          <Route path="dashboard" element={<TeacherDashboard />} />
-          {/* Add more teacher routes here */}
-          <Route path="*" element={<Navigate to="dashboard" replace />} />
-        </Routes>
-      </main>
-    </div>
+    <DashboardLayout
+      sidebar={(props) => <DashboardSidebar {...props} userRole="teacher" />}
+      navbar={(props) => <DashboardNav {...props} userRole="teacher" />}
+    >
+      <Routes>
+        <Route path="dashboard" element={<Dashboard />} />
+        
+        {/* Default route */}
+        <Route path="/" element={<Navigate to="dashboard" replace />} />
+        {/* Catch all route */}
+        <Route path="*" element={<Navigate to="dashboard" replace />} />
+      </Routes>
+    </DashboardLayout>
   );
 };
 

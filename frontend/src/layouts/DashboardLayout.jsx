@@ -1,66 +1,61 @@
-import React, { useState } from 'react';
+import React from 'react';
 import PropTypes from 'prop-types';
-import { ThemeProvider, useTheme } from '../contexts/ThemeContext';
-import Nav from '../components/dashboards/admin/Nav';
+import { Layout } from 'antd';
+import { useTheme } from '@/contexts/ThemeContext';
 
-const DashboardContent = ({ sidebar: Sidebar, children, sidebarWidth = '250px' }) => {
-  const [collapsed, setCollapsed] = useState(false);
-  const actualSidebarWidth = collapsed ? '80px' : sidebarWidth;
-  const { isDarkMode: isDark, toggleTheme } = useTheme();
+const { Header, Sider, Content } = Layout;
 
-  const toggleCollapsed = () => {
-    setCollapsed(!collapsed);
+const DashboardLayout = ({ sidebar: Sidebar, navbar: Navbar, children }) => {
+  const [sidebarCollapsed, setSidebarCollapsed] = React.useState(false);
+  const { isDarkMode } = useTheme();
+
+  const handleMenuClick = () => {
+    setSidebarCollapsed(!sidebarCollapsed);
   };
 
   return (
-    <div className="flex h-screen bg-gray-100 dark:bg-gray-900">
-      {/* Sidebar */}
-      <div 
-        className="fixed h-full transition-all duration-300 ease-in-out" 
-        style={{ width: actualSidebarWidth }}
+    <Layout className="h-screen overflow-hidden">
+      <Sider
+        trigger={null}
+        collapsible
+        collapsed={sidebarCollapsed}
+        width={256}
+        collapsedWidth={80}
+        className={`fixed left-0 h-screen ${isDarkMode ? 'bg-gray-800' : 'bg-white'} shadow-lg z-20`}
       >
-        <Sidebar collapsed={collapsed} />
-      </div>
+        {Sidebar && <Sidebar collapsed={sidebarCollapsed} />}
+      </Sider>
 
-      {/* Main Content Area */}
-      <div 
-        className="flex flex-col min-h-screen transition-all duration-300 ease-in-out" 
-        style={{ marginLeft: actualSidebarWidth, width: `calc(100% - ${actualSidebarWidth})` }}
-      >
-        {/* Navigation */}
-        <div className="sticky top-0 z-10">
-          <Nav onMenuClick={toggleCollapsed} onThemeToggle={toggleTheme} isDark={isDark} />
-        </div>
-        
-        {/* Main Content */}
-        <div className="flex-grow p-6 overflow-auto">
-          <div className="max-w-full">
+      <Layout className={`ml-[${sidebarCollapsed ? '80px' : '256px'}]`}>
+        <Header 
+          className={`fixed right-0 ${sidebarCollapsed ? 'left-[80px]' : 'left-[256px]'} top-0 p-0 ${isDarkMode ? 'bg-gray-800' : 'bg-white'} shadow-sm z-10`}
+          style={{ height: '64px', lineHeight: 'normal', padding: 0 }}
+        >
+          {Navbar && <Navbar onMenuClick={handleMenuClick} />}
+        </Header>
+
+        <Content 
+          className={`mt-16 p-6 ${isDarkMode ? 'bg-gray-900' : 'bg-gray-100'}`}
+          style={{
+            minHeight: 'calc(100vh - 64px)',
+            marginTop: '64px',
+            overflow: 'auto',
+            height: 'calc(100vh - 64px)',
+          }}
+        >
+          <div className="h-full overflow-auto">
             {children}
           </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-DashboardContent.propTypes = {
-  sidebar: PropTypes.elementType.isRequired,
-  children: PropTypes.node.isRequired,
-  sidebarWidth: PropTypes.string
-};
-
-const DashboardLayout = (props) => {
-  return (
-    <ThemeProvider>
-      <DashboardContent {...props} />
-    </ThemeProvider>
+        </Content>
+      </Layout>
+    </Layout>
   );
 };
 
 DashboardLayout.propTypes = {
-  sidebar: PropTypes.elementType.isRequired,
-  children: PropTypes.node.isRequired,
-  sidebarWidth: PropTypes.string
+  sidebar: PropTypes.func,
+  navbar: PropTypes.func,
+  children: PropTypes.node.isRequired
 };
 
 export default DashboardLayout;
