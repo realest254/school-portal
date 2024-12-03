@@ -1,194 +1,176 @@
-import React, { useState, useEffect } from 'react';
-import {
-  Box,
-  Typography,
-  Button,
-  Container,
-  Pagination,
-  Alert,
-  Snackbar
-} from '@mui/material';
-import { Add as AddIcon } from '@mui/icons-material';
-import NotificationList from '../../components/notifications/NotificationList';
-import NotificationForm from '../../components/notifications/NotificationForm';
-import NotificationFilters from '../../components/notifications/NotificationFilters';
-import { useNotifications } from '../../hooks/useNotifications';
-import LoadingSpinner from '../../components/common/LoadingSpinner';
+import React, { useState } from 'react';
+import { Card, Typography, message } from 'antd';
+import SearchAndFilterBar from '../../components/dashboards/admin/pages/NotificationsManagement/SearchAndFilterBar';
+import NotificationListTable from '../../components/dashboards/admin/pages/NotificationsManagement/NotificationListTable';
+import AddNotificationModal from '../../components/dashboards/admin/pages/NotificationsManagement/AddNotificationModal';
+import EditNotificationModal from '../../components/dashboards/admin/pages/NotificationsManagement/EditNotificationModal';
+import DeleteNotificationModal from '../../components/dashboards/admin/pages/NotificationsManagement/DeleteNotificationModal';
+import { useTheme } from '../../contexts/ThemeContext';
+
+const { Title } = Typography;
+
+// Mock data for development
+const mockNotifications = [
+  {
+    id: '1',
+    title: 'School Holiday Announcement',
+    message: 'School will be closed for winter break from Dec 20 to Jan 5',
+    priority: 'high',
+    status: 'active',
+    targetAudience: ['students', 'teachers', 'parents'],
+    createdAt: '2023-12-01T10:00:00Z'
+  },
+  {
+    id: '2',
+    title: 'Parent-Teacher Meeting',
+    message: 'Parent-teacher meetings scheduled for next week',
+    priority: 'medium',
+    status: 'scheduled',
+    targetAudience: ['parents', 'teachers'],
+    createdAt: '2023-12-02T09:30:00Z'
+  },
+  {
+    id: '3',
+    title: 'Sports Day Event',
+    message: 'Annual sports day will be held on December 15',
+    priority: 'low',
+    status: 'active',
+    targetAudience: ['students', 'teachers'],
+    createdAt: '2023-12-03T14:20:00Z'
+  }
+];
 
 const NotificationsPage = () => {
-  const [openForm, setOpenForm] = useState(false);
+  const [notifications, setNotifications] = useState(mockNotifications);
+  const [loading, setLoading] = useState(false);
   const [selectedNotification, setSelectedNotification] = useState(null);
-  const [filters, setFilters] = useState({
-    priority: '',
-    targetAudience: '',
-    status: '',
-    startDate: null,
-    endDate: null
-  });
-  const [page, setPage] = useState(1);
-  const [snackbar, setSnackbar] = useState({
-    open: false,
-    message: '',
-    severity: 'success'
-  });
+  const [isAddModalVisible, setIsAddModalVisible] = useState(false);
+  const [isEditModalVisible, setIsEditModalVisible] = useState(false);
+  const [isDeleteModalVisible, setIsDeleteModalVisible] = useState(false);
+  const { isDarkMode } = useTheme();
 
-  const {
-    notifications,
-    totalPages,
-    loading,
-    error,
-    createNotification,
-    updateNotification,
-    deleteNotification,
-    fetchNotifications
-  } = useNotifications();
+  const handleSearch = (values) => {
+    setLoading(true);
+    // Simulate API call delay
+    setTimeout(() => {
+      let filteredNotifications = [...mockNotifications];
 
-  useEffect(() => {
-    fetchNotifications(page, filters);
-  }, [page, filters]);
-
-  const handleCreateClick = () => {
-    setSelectedNotification(null);
-    setOpenForm(true);
-  };
-
-  const handleEditClick = (notification) => {
-    setSelectedNotification(notification);
-    setOpenForm(true);
-  };
-
-  const handleDeleteClick = async (id) => {
-    try {
-      await deleteNotification(id);
-      setSnackbar({
-        open: true,
-        message: 'Notification deleted successfully',
-        severity: 'success'
-      });
-      fetchNotifications(page, filters);
-    } catch (err) {
-      setSnackbar({
-        open: true,
-        message: 'Failed to delete notification',
-        severity: 'error'
-      });
-    }
-  };
-
-  const handleSubmit = async (formData) => {
-    try {
-      if (selectedNotification) {
-        await updateNotification(selectedNotification.id, formData);
-        setSnackbar({
-          open: true,
-          message: 'Notification updated successfully',
-          severity: 'success'
-        });
-      } else {
-        await createNotification(formData);
-        setSnackbar({
-          open: true,
-          message: 'Notification created successfully',
-          severity: 'success'
-        });
+      if (values.search) {
+        filteredNotifications = filteredNotifications.filter(
+          notification => 
+            notification.title.toLowerCase().includes(values.search.toLowerCase()) ||
+            notification.message.toLowerCase().includes(values.search.toLowerCase())
+        );
       }
-      setOpenForm(false);
-      fetchNotifications(page, filters);
-    } catch (err) {
-      setSnackbar({
-        open: true,
-        message: 'Failed to save notification',
-        severity: 'error'
-      });
-    }
+
+      if (values.priority) {
+        filteredNotifications = filteredNotifications.filter(
+          notification => notification.priority === values.priority
+        );
+      }
+
+      if (values.status) {
+        filteredNotifications = filteredNotifications.filter(
+          notification => notification.status === values.status
+        );
+      }
+
+      setNotifications(filteredNotifications);
+      setLoading(false);
+    }, 500);
   };
 
-  const handleFilterChange = (newFilters) => {
-    setFilters(newFilters);
-    setPage(1);
+  const handleAddNotification = (values) => {
+    const newNotification = {
+      id: String(Date.now()),
+      ...values,
+      createdAt: new Date().toISOString(),
+      status: values.status || 'active'
+    };
+
+    setNotifications([newNotification, ...notifications]);
+    setIsAddModalVisible(false);
+    message.success('Notification added successfully');
   };
 
-  const handlePageChange = (event, value) => {
-    setPage(value);
-  };
-
-  if (error) {
-    return (
-      <Container>
-        <Alert severity="error">
-          Error loading notifications: {error.message}
-        </Alert>
-      </Container>
+  const handleEditNotification = (values) => {
+    const updatedNotifications = notifications.map(notification =>
+      notification.id === selectedNotification.id
+        ? { ...notification, ...values }
+        : notification
     );
-  }
+
+    setNotifications(updatedNotifications);
+    setIsEditModalVisible(false);
+    message.success('Notification updated successfully');
+  };
+
+  const handleDeleteNotification = () => {
+    const filteredNotifications = notifications.filter(
+      notification => notification.id !== selectedNotification.id
+    );
+
+    setNotifications(filteredNotifications);
+    setIsDeleteModalVisible(false);
+    message.success('Notification deleted successfully');
+  };
 
   return (
-    <Container>
-      <Box sx={{ mb: 4 }}>
-        <Box
-          sx={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            mb: 3
-          }}
-        >
-          <Typography variant="h4">Notifications</Typography>
-          <Button
-            variant="contained"
-            color="primary"
-            startIcon={<AddIcon />}
-            onClick={handleCreateClick}
-          >
-            Create Notification
-          </Button>
-        </Box>
+    <div className="p-6">
+      <Card bordered={false}>
+        <div className="mb-4">
+          <Title level={2} style={{ margin: 0, color: isDarkMode ? '#fff' : undefined }}>
+            Notifications Management
+          </Title>
+        </div>
 
-        <NotificationFilters
-          filters={filters}
-          onFilterChange={handleFilterChange}
+        <SearchAndFilterBar
+          onSearch={handleSearch}
+          onAdd={() => setIsAddModalVisible(true)}
         />
 
-        {loading ? (
-          <LoadingSpinner />
-        ) : (
-          <>
-            <NotificationList
-              notifications={notifications}
-              onEdit={handleEditClick}
-              onDelete={handleDeleteClick}
-            />
+        <NotificationListTable
+          loading={loading}
+          dataSource={notifications}
+          pagination={{
+            total: notifications.length,
+            pageSize: 10,
+            current: 1
+          }}
+          onEdit={(record) => {
+            setSelectedNotification(record);
+            setIsEditModalVisible(true);
+          }}
+          onDelete={(record) => {
+            setSelectedNotification(record);
+            setIsDeleteModalVisible(true);
+          }}
+        />
 
-            <Box sx={{ display: 'flex', justifyContent: 'center', mt: 3 }}>
-              <Pagination
-                count={totalPages}
-                page={page}
-                onChange={handlePageChange}
-                color="primary"
-              />
-            </Box>
-          </>
-        )}
-      </Box>
+        <AddNotificationModal
+          visible={isAddModalVisible}
+          onCancel={() => setIsAddModalVisible(false)}
+          onSubmit={handleAddNotification}
+          loading={loading}
+        />
 
-      <NotificationForm
-        open={openForm}
-        notification={selectedNotification}
-        onClose={() => setOpenForm(false)}
-        onSubmit={handleSubmit}
-        loading={loading}
-      />
+        <EditNotificationModal
+          visible={isEditModalVisible}
+          onCancel={() => setIsEditModalVisible(false)}
+          onSubmit={handleEditNotification}
+          loading={loading}
+          notification={selectedNotification}
+        />
 
-      <Snackbar
-        open={snackbar.open}
-        autoHideDuration={6000}
-        onClose={() => setSnackbar({ ...snackbar, open: false })}
-      >
-        <Alert severity={snackbar.severity} onClose={() => setSnackbar({ ...snackbar, open: false })}>
-          {snackbar.message}
-        </Alert>
-      </Snackbar>
-    </Container>
+        <DeleteNotificationModal
+          visible={isDeleteModalVisible}
+          onCancel={() => setIsDeleteModalVisible(false)}
+          onConfirm={handleDeleteNotification}
+          loading={loading}
+          notification={selectedNotification}
+        />
+      </Card>
+    </div>
   );
 };
 
