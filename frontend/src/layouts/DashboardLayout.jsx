@@ -14,33 +14,32 @@ const DashboardLayout = ({ sidebar: Sidebar, navbar: Navbar, children }) => {
   };
 
   return (
-    <Layout className="h-screen overflow-hidden">
+    <Layout className="min-h-screen">
       <Sider
         trigger={null}
         collapsible
         collapsed={sidebarCollapsed}
         width={256}
         collapsedWidth={80}
-        className={`fixed left-0 h-screen ${isDarkMode ? 'bg-gray-800' : 'bg-white'} shadow-lg z-20`}
+        className={`fixed left-0 top-0 h-full ${isDarkMode ? 'bg-gray-800' : 'bg-white'} shadow-lg z-20`}
       >
         {Sidebar && <Sidebar collapsed={sidebarCollapsed} />}
       </Sider>
 
-      <Layout className={`ml-[${sidebarCollapsed ? '80px' : '256px'}]`}>
+      <Layout style={{ marginLeft: sidebarCollapsed ? '80px' : '256px', minHeight: '100vh' }}>
         <Header 
-          className={`fixed right-0 ${sidebarCollapsed ? 'left-[80px]' : 'left-[256px]'} top-0 p-0 ${isDarkMode ? 'bg-gray-800' : 'bg-white'} shadow-sm z-10`}
-          style={{ height: '64px', lineHeight: 'normal', padding: 0 }}
+          className={`fixed top-0 right-0 left-0 ${isDarkMode ? 'bg-gray-800' : 'bg-white'} shadow-sm z-10`}
+          style={{ height: '64px', padding: 0 }}
         >
           {Navbar && <Navbar onMenuClick={handleMenuClick} />}
         </Header>
 
         <Content 
-          className={`mt-16 p-6 ${isDarkMode ? 'bg-gray-900' : 'bg-gray-100'}`}
+          className={`${isDarkMode ? 'bg-gray-900' : 'bg-gray-100'} p-6`}
           style={{
-            minHeight: 'calc(100vh - 64px)',
             marginTop: '64px',
-            overflow: 'auto',
-            height: 'calc(100vh - 64px)',
+            minHeight: 'calc(100vh - 64px)',
+            overflow: 'auto'
           }}
         >
           <div className="h-full overflow-auto">

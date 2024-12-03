@@ -107,32 +107,67 @@ const StudentsPage = () => {
   };
 
   return (
-    <div className="container mx-auto px-4 py-6 max-w-[1400px]">
-      <Title level={2} className={`mb-6 ${isDarkMode ? 'text-gray-100' : 'text-gray-800'}`}>
-        Student Management
-      </Title>
-      <div className="space-y-6">
-        <SearchAndFilterBar 
-          onSearch={handleSearch}
-          onAddNew={() => setIsAddModalVisible(true)}
-        />
-        
-        <Card className="overflow-x-auto">
-          <StudentListTable 
-            students={students}
-            loading={loading}
-            pagination={pagination}
-            onChange={handleTableChange}
-            onEdit={(student) => {
-              setSelectedStudent(student);
-              setIsEditModalVisible(true);
-            }}
-            onDelete={(student) => {
-              setSelectedStudent(student);
-              setIsDeleteModalVisible(true);
-            }}
+    <div className="container mx-auto px-4 py-8 max-w-[1400px]">
+      <div className="flex flex-col gap-8">
+        {/* Header Section */}
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+          <div>
+            <Title 
+              level={2} 
+              className={`
+                mb-0 
+                ${isDarkMode ? 'text-gray-100' : 'text-gray-800'}
+              `}
+            >
+              Student Management
+            </Title>
+            <Typography.Text
+              className={`
+                text-sm mt-1 block
+                ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}
+              `}
+            >
+              Manage and monitor student information, enrollment status, and academic records
+            </Typography.Text>
+          </div>
+        </div>
+
+        {/* Search and Content Section */}
+        <div className="space-y-6">
+          <SearchAndFilterBar 
+            onSearch={handleSearch}
+            onAddNew={() => setIsAddModalVisible(true)}
           />
-        </Card>
+          
+          <Card 
+            className={`
+              overflow-hidden rounded-lg border-0
+              ${isDarkMode 
+                ? 'bg-gray-800 shadow-dark' 
+                : 'bg-white shadow-sm hover:shadow-md transition-shadow duration-200'
+              }
+            `}
+            bodyStyle={{ 
+              padding: '0',
+              background: isDarkMode ? undefined : 'linear-gradient(to right, #ffffff, #f8fafc)'
+            }}
+          >
+            <StudentListTable 
+              students={students}
+              loading={loading}
+              pagination={pagination}
+              onChange={handleTableChange}
+              onEdit={(student) => {
+                setSelectedStudent(student);
+                setIsEditModalVisible(true);
+              }}
+              onDelete={(student) => {
+                setSelectedStudent(student);
+                setIsDeleteModalVisible(true);
+              }}
+            />
+          </Card>
+        </div>
       </div>
 
       <AddStudentModal
