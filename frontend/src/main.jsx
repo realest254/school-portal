@@ -2,6 +2,8 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { ConfigProvider, theme } from 'antd';
+import { SnackbarProvider } from 'notistack';
+import { AuthProvider } from './contexts/AuthContext';
 import 'antd/dist/reset.css'
 import './index.css'
 import App from './App'
@@ -29,8 +31,12 @@ const ThemedApp = () => {
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <ThemeProvider>
-      <ThemedApp />
-    </ThemeProvider>
+    <AuthProvider>
+      <ThemeProvider>
+        <SnackbarProvider maxSnack={3}>
+          <ThemedApp />
+        </SnackbarProvider>
+      </ThemeProvider>
+    </AuthProvider>
   </React.StrictMode>
 )
