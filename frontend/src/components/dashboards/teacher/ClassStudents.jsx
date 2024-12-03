@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Card, Input, List, Avatar, Badge, Typography, Space } from 'antd';
 import { UserOutlined, SearchOutlined } from '@ant-design/icons';
-import { useTheme } from '../../../../../contexts/ThemeContext';
+import { useTheme } from '../../../contexts/ThemeContext';
 
 const { Text, Title } = Typography;
 

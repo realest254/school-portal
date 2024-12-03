@@ -1,6 +1,6 @@
 import React from 'react';
 import { Row, Col, Typography } from 'antd';
-import { useTheme } from '../../../../../contexts/ThemeContext';
+import { useTheme } from '../../../contexts/ThemeContext';
 import ClassStudents from './ClassStudents';
 import NotificationsCard from './NotificationsCard';
 import IndisciplineCases from './IndisciplineCases';

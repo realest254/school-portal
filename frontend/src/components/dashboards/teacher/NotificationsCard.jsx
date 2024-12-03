@@ -7,7 +7,7 @@ import {
   UserOutlined,
   TeamOutlined
 } from '@ant-design/icons';
-import { useTheme } from '../../../../../contexts/ThemeContext';
+import { useTheme } from '../../../contexts/ThemeContext';
 
 const { Text } = Typography;
 
