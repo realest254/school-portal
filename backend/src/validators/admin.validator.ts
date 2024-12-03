@@ -282,7 +282,7 @@ const inviteCreateSchema = z.object({
   email: z.string().email(),
   role: z.enum(['teacher', 'student', 'admin']),
   expiresAt: z.string().transform((val) => new Date(val)).optional(),
-  metadata: z.object().optional()
+  metadata: z.object({}).optional()
 });
 
 const inviteBulkCreateSchema = z.array(z.object({
