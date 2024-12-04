@@ -7,39 +7,13 @@ import {
   RightOutlined
 } from '@ant-design/icons';
 import { useTheme } from '../../../contexts/ThemeContext';
+import { useTeacher } from '../../../contexts/TeacherContext';
 
 const { Text, Paragraph } = Typography;
 
 const IndisciplineCases = () => {
   const { isDarkMode: isDark } = useTheme();
-
-  // Mock data - replace with actual API call
-  const cases = [
-    {
-      id: 1,
-      student: 'John Doe',
-      incident: 'Disruptive behavior in class',
-      date: '2024-01-15',
-      status: 'pending',
-      severity: 'medium'
-    },
-    {
-      id: 2,
-      student: 'Jane Smith',
-      incident: 'Late to class repeatedly',
-      date: '2024-01-14',
-      status: 'resolved',
-      severity: 'low'
-    },
-    {
-      id: 3,
-      student: 'Mike Johnson',
-      incident: 'Fighting with classmate',
-      date: '2024-01-13',
-      status: 'pending',
-      severity: 'high'
-    },
-  ];
+  const { indisciplineCases: cases } = useTeacher();
 
   const getSeverityTag = (severity) => {
     const config = {
@@ -77,8 +51,12 @@ const IndisciplineCases = () => {
           View All
         </Button>
       }
+      styles={{
+        body: {
+          padding: '0 24px 24px'
+        }
+      }}
       className={isDark ? 'bg-gray-800' : undefined}
-      bodyStyle={{ padding: '0' }}
     >
       <List
         dataSource={cases}

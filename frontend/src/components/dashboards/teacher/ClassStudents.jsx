@@ -2,20 +2,14 @@ import React, { useState } from 'react';
 import { Card, Input, List, Avatar, Badge, Typography, Space } from 'antd';
 import { UserOutlined, SearchOutlined } from '@ant-design/icons';
 import { useTheme } from '../../../contexts/ThemeContext';
+import { useTeacher } from '../../../contexts/TeacherContext';
 
 const { Text, Title } = Typography;
 
 const ClassStudents = () => {
   const { isDarkMode } = useTheme();
+  const { students } = useTeacher();
   const [searchTerm, setSearchTerm] = useState('');
-  
-  // Mock data - replace with actual API call
-  const students = [
-    { id: 1, name: 'John Doe', class: '4A', attendance: 'present' },
-    { id: 2, name: 'Jane Smith', class: '4A', attendance: 'absent' },
-    { id: 3, name: 'Mike Johnson', class: '4A', attendance: 'present' },
-    { id: 4, name: 'Sarah Williams', class: '4A', attendance: 'late' },
-  ];
 
   const filteredStudents = students.filter(student =>
     student.name.toLowerCase().includes(searchTerm.toLowerCase())
@@ -52,7 +46,11 @@ const ClassStudents = () => {
         </Space>
       }
       className={isDarkMode ? 'bg-gray-800' : undefined}
-      bodyStyle={{ padding: '0' }}
+      styles={{
+        body: {
+          padding: 0
+        }
+      }}
     >
       <div className="px-4 py-2">
         <Input

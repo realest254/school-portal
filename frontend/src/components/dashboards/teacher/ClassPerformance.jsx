@@ -8,31 +8,13 @@ import {
   CheckCircleOutlined
 } from '@ant-design/icons';
 import { useTheme } from '../../../contexts/ThemeContext';
+import { useTeacher } from '../../../contexts/TeacherContext';
 
 const { Text, Title } = Typography;
 
 const ClassPerformance = () => {
   const { isDarkMode } = useTheme();
-
-  // Mock data - replace with actual API call
-  const performanceData = {
-    currentTerm: {
-      average: 72.5,
-      trend: 'up',
-      change: 3.2
-    },
-    termlyAverages: [
-      { term: 'T1', average: 68.2 },
-      { term: 'T2', average: 69.3 },
-      { term: 'T3', average: 72.5 }
-    ],
-    subjectPerformance: [
-      { subject: 'Math', score: 75, trend: 'up' },
-      { subject: 'Eng', score: 70, trend: 'down' },
-      { subject: 'Sci', score: 73, trend: 'up' },
-      { subject: 'Hist', score: 68, trend: 'down' }
-    ]
-  };
+  const { performanceData } = useTeacher();
 
   const cardStyle = {
     backgroundColor: isDarkMode ? '#1f2937' : undefined,
@@ -42,6 +24,25 @@ const ClassPerformance = () => {
   const textStyle = {
     color: isDarkMode ? '#fff' : undefined
   };
+
+  // Handle case where performanceData is null or undefined
+  if (!performanceData || !performanceData.termlyAverages) {
+    return (
+      <Card
+        title={
+          <Space>
+            <TrophyOutlined style={{ color: isDarkMode ? '#fff' : undefined }} />
+            <Text strong style={{ color: isDarkMode ? '#fff' : undefined }}>
+              Class Performance
+            </Text>
+          </Space>
+        }
+        className={isDarkMode ? 'bg-gray-800' : undefined}
+      >
+        <Text>Loading performance data...</Text>
+      </Card>
+    );
+  }
 
   // Calculate the maximum value for the graph
   const maxAverage = Math.max(...performanceData.termlyAverages.map(term => term.average));

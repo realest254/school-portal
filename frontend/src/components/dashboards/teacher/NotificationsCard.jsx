@@ -8,36 +8,13 @@ import {
   TeamOutlined
 } from '@ant-design/icons';
 import { useTheme } from '../../../contexts/ThemeContext';
+import { useTeacher } from '../../../contexts/TeacherContext';
 
 const { Text } = Typography;
 
 const NotificationsCard = () => {
   const { isDarkMode } = useTheme();
-
-  // Mock data - replace with actual API call
-  const notifications = [
-    {
-      id: 1,
-      title: 'Assignment Submission',
-      message: 'John Doe submitted Math homework',
-      time: '2 minutes ago',
-      type: 'assignment'
-    },
-    {
-      id: 2,
-      title: 'Absence Report',
-      message: 'Jane Smith was marked absent today',
-      time: '1 hour ago',
-      type: 'attendance'
-    },
-    {
-      id: 3,
-      title: 'Parent Meeting',
-      message: 'Upcoming meeting with Mike\'s parents',
-      time: '2 hours ago',
-      type: 'meeting'
-    },
-  ];
+  const { notifications } = useTeacher();
 
   const getNotificationIcon = (type) => {
     switch (type) {
@@ -72,7 +49,13 @@ const NotificationsCard = () => {
         </Space>
       }
       className={isDarkMode ? 'bg-gray-800' : undefined}
-      bodyStyle={{ padding: '0' }}
+      styles={{
+        body: {
+          padding: '0 24px',
+          maxHeight: '400px',
+          overflowY: 'auto'
+        }
+      }}
     >
       <List
         dataSource={notifications}

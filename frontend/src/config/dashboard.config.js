@@ -41,7 +41,8 @@ export const dashboardConfig = {
     title: 'Teacher Portal',
     shortTitle: 'TP',
     navigation: [
-      { icon: LayoutDashboard, name: 'Dashboard', path: 'dashboard' }
+      { icon: LayoutDashboard, name: 'Dashboard', path: 'dashboard' },
+      { icon: FileSpreadsheet, name: 'Grades', path: 'grades' }
     ],
     defaultNotifications: [
       { id: 1, message: 'Class schedule updated', time: '2 min ago' },

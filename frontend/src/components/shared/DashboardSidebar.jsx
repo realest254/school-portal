@@ -4,7 +4,7 @@ import PropTypes from 'prop-types';
 import { useTheme } from '@/contexts/ThemeContext';
 import { dashboardConfig } from '@/config/dashboard.config';
 
-const DashboardSidebar = ({ collapsed, userRole }) => {
+const DashboardSidebar = ({ collapsed = false, userRole }) => {
   const { isDarkMode } = useTheme();
   const config = dashboardConfig[userRole];
   
@@ -57,10 +57,6 @@ const DashboardSidebar = ({ collapsed, userRole }) => {
 DashboardSidebar.propTypes = {
   collapsed: PropTypes.bool,
   userRole: PropTypes.oneOf(['admin', 'teacher', 'student']).isRequired
-};
-
-DashboardSidebar.defaultProps = {
-  collapsed: false
 };
 
 export default DashboardSidebar;
