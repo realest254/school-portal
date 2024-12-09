@@ -165,6 +165,50 @@ export const TeacherProvider = ({ children }) => {
     localStorage.removeItem(STORAGE_KEY);
   };
 
+  // Function to submit grades
+  const submitGrades = async (examId) => {
+    try {
+      // Transform grades into simplified format
+      const gradesData = {
+        examId,
+        grades: Object.entries(grades).map(([studentId, studentGrades]) => ({
+          student_id: studentId,
+          subject_scores: studentGrades
+        }))
+      };
+
+      const response = await gradeService.submitGrades(gradesData);
+      
+      if (response.success) {
+        // Clear form after successful submission
+        setGrades({});
+        setExamDetails({ examName: '', term: null, year: null });
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error('Error submitting grades:', error);
+      return false;
+    }
+  };
+
+  // Function to load existing grades
+  const loadGrades = async (examId) => {
+    try {
+      const response = await gradeService.getExamGrades(examId);
+      if (response.success) {
+        // Transform JSONB data back to our state format
+        const gradesMap = {};
+        response.data.forEach(grade => {
+          gradesMap[grade.student_id] = grade.subject_scores;
+        });
+        setGrades(gradesMap);
+      }
+    } catch (error) {
+      console.error('Error loading grades:', error);
+    }
+  };
+
   const value = {
     teacherData,
     classData,
@@ -180,7 +224,9 @@ export const TeacherProvider = ({ children }) => {
     setGrades,
     selectedSubjects,
     setSelectedSubjects,
-    clearForm
+    clearForm,
+    submitGrades,
+    loadGrades
   };
 
   return (

@@ -9,7 +9,7 @@ import GradesTable from '../../components/dashboards/teacher/GradesTable';
 import SubjectSelector from '../../components/dashboards/teacher/SubjectSelector';
 import ExamDetailsForm from '../../components/dashboards/teacher/ExamDetailsForm';
 import GradesSummary from '../../components/dashboards/teacher/GradesSummary';
-import { gradeService } from '../../services/gradeService';
+import { gradeService, examService } from '../../services/gradeService';
 
 const GradesManagement = () => {
   const { user } = useAuth();
@@ -146,23 +146,29 @@ const GradesManagement = () => {
     try {
       setSaving(true);
       
-      const gradesData = {
-        examDetails: {
-          examName: examDetails.examName,
-          term: examDetails.term,
-          year: examDetails.year
-        },
-        grades,
+      // First create the exam
+      const examResult = await examService.createExam({
+        name: examDetails.examName,
+        term: examDetails.term,
+        year: examDetails.year,
         classId: students[0]?.class_id
-      };
+      });
 
-      const result = await gradeService.submitGrades(gradesData);
+      // Then submit the grades using the new exam ID
+      const result = await gradeService.submitGrades({
+        examId: examResult.data.id,
+        grades: Object.entries(grades).map(([studentId, subjectGrades]) => ({
+          student_id: studentId,
+          subject_scores: subjectGrades
+        }))
+      });
+
       message.success(`Successfully saved ${result.gradesSubmitted} grades for exam ${examDetails.examName}`);
       setUnsavedChanges(false);
 
       // Load statistics for the new exam
       try {
-        const stats = await gradeService.getGradeStatistics(result.examId);
+        const stats = await gradeService.getGradeStatistics(examResult.data.id);
         setStatistics(stats.data);
       } catch (error) {
         console.error('Error loading statistics:', error);

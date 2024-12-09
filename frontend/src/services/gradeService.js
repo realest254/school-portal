@@ -28,77 +28,38 @@ export const gradeService = {
     return axios.get('/api/subjects');
   },
 
-  // Submit grades with optimized structure
+  // Submit grades with JSONB structure
   submitGrades: async (gradesData) => {
-    // First create exam record
-    const examPayload = {
-      name: gradesData.examDetails.examName,
-      term: gradesData.examDetails.term,
-      year: gradesData.examDetails.year,
-      class_id: gradesData.classId
-    };
-
-    if (USE_MOCK) {
-      console.log('Mock Create Exam:', examPayload);
-      const mockExamId = 'exam-' + Date.now();
-
-      // Transform grades with exam reference
-      const transformedGrades = [];
-      Object.entries(gradesData.grades).forEach(([studentId, studentGrades]) => {
-        Object.entries(studentGrades).forEach(([subjectId, score]) => {
-          transformedGrades.push({
-            exam_id: mockExamId,
-            student_id: studentId,
-            subject_id: subjectId,
-            score: parseFloat(score)
-          });
-        });
-      });
-
-      console.log('Mock Submit Grades:', transformedGrades);
-      // Simulate API delay
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      return { 
-        success: true,
-        examId: mockExamId,
-        gradesSubmitted: transformedGrades.length 
-      };
-    }
-
     try {
-      // Create exam first
+      // First create the exam
+      const examPayload = {
+        name: gradesData.examDetails.examName,
+        term: gradesData.examDetails.term,
+        year: gradesData.examDetails.year,
+        classId: gradesData.classId
+      };
+
+      // Create exam using exam endpoint
       const examResponse = await axios.post('/api/exams', examPayload);
-      const examId = examResponse.data.id;
+      const examId = examResponse.data.data.id;
 
-      // Transform grades with exam reference
-      const transformedGrades = [];
-      Object.entries(gradesData.grades).forEach(([studentId, studentGrades]) => {
-        Object.entries(studentGrades).forEach(([subjectId, score]) => {
-          transformedGrades.push({
-            exam_id: examId,
-            student_id: studentId,
-            subject_id: subjectId,
-            score: parseFloat(score)
-          });
-        });
-      });
+      // Prepare grades data
+      const gradesPayload = Object.entries(gradesData.grades).map(([studentId, subjectScores]) => ({
+        exam_id: examId,
+        student_id: studentId,
+        class_id: gradesData.classId,
+        subject_scores: subjectScores,
+        academic_year: gradesData.examDetails.year
+      }));
 
-      // Submit grades in batches of 500
-      const batchSize = 500;
-      const batches = [];
-      for (let i = 0; i < transformedGrades.length; i += batchSize) {
-        batches.push(transformedGrades.slice(i, i + batchSize));
-      }
-
-      // Submit all batches
-      const results = await Promise.all(
-        batches.map(batch => axios.post('/api/grades/batch', batch))
-      );
+      // Submit grades using grades endpoint
+      const gradesResponse = await axios.post('/api/grades', gradesPayload);
 
       return {
         success: true,
         examId,
-        gradesSubmitted: transformedGrades.length
+        gradesSubmitted: gradesPayload.length,
+        data: gradesResponse.data
       };
     } catch (error) {
       console.error('Error submitting grades:', error);
@@ -106,47 +67,122 @@ export const gradeService = {
     }
   },
 
-  // Get grade statistics with optimized queries
+  // Get grade statistics
   getGradeStatistics: async (examId) => {
     if (USE_MOCK) {
-      // Simulate API delay
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // Generate mock statistics
-      const mockStats = {
-        examDetails: {
-          id: examId,
-          name: "Mid-Term Exam",
-          term: 2,
-          year: 2024,
-          class_name: "Form 1A"
-        },
-        classAverage: 72.5,
-        highestScore: 98,
-        lowestScore: 45,
-        studentRankings: mockStudents.data.map((student, index) => ({
-          ...student,
-          total_score: 350 - (index * 20),
-          average_score: 70 - (index * 4),
-          rank: index + 1,
-          subject_scores: mockSubjects.data.reduce((acc, subject) => ({
-            ...acc,
-            [subject.id]: Math.max(45, Math.floor(85 - (index * 5) + (Math.random() * 10)))
-          }), {})
-        })),
-        subjectStatistics: mockSubjects.data.map(subject => ({
-          subject_id: subject.id,
-          subject_name: subject.name,
-          average: 70 + (Math.random() * 10),
-          highest: 95 + (Math.random() * 5),
-          lowest: 45 + (Math.random() * 10),
-          passes: 4,
-          fails: 1
-        }))
+      return {
+        data: {
+          classAverage: 75.5,
+          highestScore: 95,
+          lowestScore: 45,
+          submissions: 40,
+          subjectAverages: {
+            'Mathematics': 78.5,
+            'English': 72.3,
+            'Science': 76.8
+          }
+        }
       };
-      
-      return { data: mockStats };
     }
-    return axios.get(`/api/exams/${examId}/statistics`);
+    return axios.get(`/api/grades/statistics?examId=${examId}`);
+  },
+
+  // Get student's term report
+  getStudentTermReport: async (studentId, term, year) => {
+    if (USE_MOCK) {
+      return {
+        data: {
+          student: mockStudents.data.find(s => s.id === studentId),
+          termAverage: 78.5,
+          rank: 5,
+          totalStudents: 40,
+          subjects: mockSubjects.data.map(sub => ({
+            id: sub.id,
+            name: sub.name,
+            score: Math.floor(Math.random() * 30) + 70
+          }))
+        }
+      };
+    }
+    return axios.get(`/api/grades/student/${studentId}/term?term=${term}&year=${year}`);
+  },
+
+  // Get student's yearly report
+  getStudentYearlyReport: async (studentId, year) => {
+    if (USE_MOCK) {
+      // Mock data for yearly report
+      return {
+        data: [
+          {
+            term: 1,
+            subjects: {
+              Mathematics: { average_score: 87.7, rank: 4, total_students: 40 },
+              English: { average_score: 81.7, rank: 7, total_students: 40 },
+              Science: { average_score: 92.0, rank: 2, total_students: 40 },
+              History: { average_score: 87.3, rank: 4, total_students: 40 },
+              Geography: { average_score: 79.7, rank: 8, total_students: 40 }
+            },
+            term_average: 85.7
+          },
+          {
+            term: 2,
+            subjects: {
+              Mathematics: { average_score: 89.3, rank: 3, total_students: 40 },
+              English: { average_score: 84.0, rank: 5, total_students: 40 },
+              Science: { average_score: 93.3, rank: 1, total_students: 40 },
+              History: { average_score: 88.7, rank: 3, total_students: 40 },
+              Geography: { average_score: 80.7, rank: 7, total_students: 40 }
+            },
+            term_average: 87.2
+          },
+          {
+            term: 3,
+            subjects: {
+              Mathematics: { average_score: 91.7, rank: 2, total_students: 40 },
+              English: { average_score: 86.3, rank: 4, total_students: 40 },
+              Science: { average_score: 94.7, rank: 1, total_students: 40 },
+              History: { average_score: 90.3, rank: 2, total_students: 40 },
+              Geography: { average_score: 84.0, rank: 5, total_students: 40 }
+            },
+            term_average: 89.4
+          }
+        ]
+      };
+    }
+    return axios.get(`/api/grades/student/${studentId}/year?year=${year}`);
+  },
+
+  // Get class term report
+  getClassTermReport: async (classId, term, year) => {
+    if (USE_MOCK) {
+      // Mock data for class term report
+      return {
+        data: [
+          {
+            exam_name: 'CAT 1',
+            students: [
+              {
+                student_id: 'student-001',
+                student_name: 'John Doe',
+                admission_number: 'ADM001',
+                total_score: 419,
+                average_score: 83.8,
+                rank: 8,
+                subject_scores: {
+                  Mathematics: 85,
+                  English: 78,
+                  Science: 92,
+                  History: 88,
+                  Geography: 76
+                }
+              },
+              // ... more students
+            ]
+          },
+          // ... more exams
+        ]
+      };
+    }
+    return axios.get(`/api/grades/class/${classId}/term?term=${term}&year=${year}`);
   }
 };
