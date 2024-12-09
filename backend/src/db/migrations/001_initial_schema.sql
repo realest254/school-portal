@@ -160,16 +160,41 @@ CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created
 CREATE INDEX IF NOT EXISTS idx_notifications_scheduled_for ON notifications(scheduled_for);
 CREATE INDEX IF NOT EXISTS idx_notifications_expires_at ON notifications(expires_at);
 
+-- Create exams table
+CREATE TABLE IF NOT EXISTS exams (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name TEXT NOT NULL,
+    term INTEGER CHECK (term BETWEEN 1 AND 3),
+    year INTEGER CHECK (year BETWEEN 2000 AND 2100),
+    class_id UUID REFERENCES classes(id) ON DELETE CASCADE,
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'archived')),
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Add indexes for exams table
+CREATE INDEX IF NOT EXISTS idx_exams_class ON exams(class_id);
+CREATE INDEX IF NOT EXISTS idx_exams_year_term ON exams(year, term);
+CREATE INDEX IF NOT EXISTS idx_exams_status ON exams(status);
+
+-- Add trigger for exams updated_at
+CREATE TRIGGER update_exams_updated_at
+    BEFORE UPDATE ON exams
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+-- Add table comments
+COMMENT ON TABLE exams IS 'Stores examination records for different classes and terms';
+COMMENT ON COLUMN exams.status IS 'Status of the exam - active or archived';
+
 -- Create grades table
 CREATE TABLE IF NOT EXISTS grades (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     student_id UUID REFERENCES students(id) ON DELETE CASCADE,
     class_id UUID REFERENCES classes(id) ON DELETE CASCADE,
     subject_id UUID REFERENCES subjects(id) ON DELETE CASCADE,
+    exam_id UUID REFERENCES exams(id) ON DELETE CASCADE,
     score NUMERIC CHECK (score >= 0 AND score <= 100),
-    term INTEGER CHECK (term BETWEEN 1 AND 3),
-    year INTEGER CHECK (year BETWEEN 2000 AND 2100),
-    exam_name TEXT NOT NULL,
     created_at TIMESTAMPTZ DEFAULT now(),
     updated_at TIMESTAMPTZ DEFAULT now()
 );
@@ -178,8 +203,8 @@ CREATE TABLE IF NOT EXISTS grades (
 CREATE INDEX IF NOT EXISTS idx_grades_student ON grades(student_id);
 CREATE INDEX IF NOT EXISTS idx_grades_class ON grades(class_id);
 CREATE INDEX IF NOT EXISTS idx_grades_subject ON grades(subject_id);
-CREATE INDEX IF NOT EXISTS idx_grades_year_term ON grades(year, term);
-CREATE INDEX IF NOT EXISTS idx_grades_composite ON grades(class_id, subject_id, term, year);
+CREATE INDEX IF NOT EXISTS idx_grades_exam ON grades(exam_id);
+CREATE INDEX IF NOT EXISTS idx_grades_composite ON grades(exam_id, class_id, subject_id);
 
 -- Add trigger for grades updated_at
 CREATE TRIGGER update_grades_updated_at
@@ -190,5 +215,3 @@ CREATE TRIGGER update_grades_updated_at
 -- Add table and column comments
 COMMENT ON TABLE grades IS 'Stores student grades for different subjects, terms, and exams';
 COMMENT ON COLUMN grades.score IS 'Numeric grade score between 0 and 100';
-COMMENT ON COLUMN grades.term IS 'Academic term (1-3)';
-COMMENT ON COLUMN grades.exam_name IS 'Name of the examination';
