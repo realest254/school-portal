@@ -1,18 +1,32 @@
-import { PoolClient } from 'pg';
-import SQL from 'sql-template-strings';
-import pool from '../db/index';
+import pool from '../config/database';
 import { logError, logInfo } from '../utils/logger';
+import SQL from 'sql-template-strings';
+import { z } from 'zod';
+import { v4 as uuidv4 } from 'uuid';
 import { 
   ServiceError, 
   ServiceResult,
-  PaginatedResult
+  createUUID
 } from '../types/common.types';
-import { Grade, GradeQuery } from '../validators/grade.validator';
+import {
+  Grade,
+  GradeWithDetails,
+  CreateGradeData,
+  GradeNotFoundError,
+  DuplicateGradeError,
+  GradeSchema,
+  SubjectScoresSchema,
+  BulkGradeInput,
+  GradeStatistics,
+  GradesWithStats
+} from '../types/grade.types';
 
-export class GradeNotFoundError extends ServiceError {
-  constructor(identifier: string) {
-    super(`Grade not found: ${identifier}`, 'GRADE_NOT_FOUND', 404);
-  }
+// Custom filters interface for getStudentGradesByFilter
+interface StudentGradeFilters {
+  admissionNumber?: string;
+  studentName?: string;
+  classId?: string;
+  examId?: string;
 }
 
 export class GradeService {
@@ -26,357 +40,245 @@ export class GradeService {
     return GradeService.instance;
   }
 
-  async getGrades(query: GradeQuery): Promise<PaginatedResult<Grade[]>> {
+  private static validateFilters(filters: StudentGradeFilters): void {
+    if (filters.admissionNumber) {
+      z.string().min(1).max(50).parse(filters.admissionNumber);
+    }
+    if (filters.studentName) {
+      z.string().min(1).max(100).parse(filters.studentName);
+    }
+    if (filters.classId) {
+      z.string().uuid().parse(filters.classId);
+    }
+    if (filters.examId) {
+      z.string().uuid().parse(filters.examId);
+    }
+  }
+
+  async createBulkGrades(data: BulkGradeInput): Promise<ServiceResult<{ gradesSubmitted: number }>> {
+    const client = await pool.connect();
     try {
+      await client.query('BEGIN');
+
+      // Validate exam exists and get year
+      const { rows: [exam] } = await client.query(SQL`
+        SELECT year FROM exams WHERE id = ${data.examId}
+      `);
+
+      if (!exam) {
+        throw new ServiceError('Exam not found', 'EXAM_NOT_FOUND', 404);
+      }
+
+      // Validate all students exist
+      const studentIds = data.grades.map(g => g.studentId);
+      const { rows: students } = await client.query(SQL`
+        SELECT id FROM students WHERE id = ANY(${studentIds})
+      `);
+
+      if (students.length !== studentIds.length) {
+        throw new ServiceError('One or more invalid student IDs', 'INVALID_STUDENT');
+      }
+
+      // Insert all grades
+      const values = data.grades.map(grade => ({
+        id: createUUID(uuidv4()),
+        examId: data.examId,
+        studentId: grade.studentId,
+        subjectScores: grade.subjectScores,
+        academicYear: exam.year
+      }));
+
+      const result = await client.query(SQL`
+        INSERT INTO grades_optimized (
+          id, exam_id, student_id, subject_scores, academic_year
+        )
+        SELECT 
+          v.id, v.exam_id, v.student_id, v.subject_scores::jsonb, v.academic_year
+        FROM jsonb_to_recordset(${JSON.stringify(values)}) AS v(
+          id uuid, exam_id uuid, student_id uuid, 
+          subject_scores jsonb, academic_year integer
+        )
+        ON CONFLICT (exam_id, student_id) DO NOTHING
+      `);
+
+      await client.query('COMMIT');
+      return { 
+        success: true,
+        data: { gradesSubmitted: result.rowCount ?? 0 }
+      };
+
+    } catch (error) {
+      await client.query('ROLLBACK');
+      if (error instanceof ServiceError) throw error;
+      throw new ServiceError('Failed to create bulk grades', 'BULK_CREATE_ERROR');
+    } finally {
+      client.release();
+    }
+  }
+
+  async getStudentGradesByFilter(filters: StudentGradeFilters): Promise<ServiceResult<GradesWithStats>> {
+    try {
+      GradeService.validateFilters(filters);
+
+      // Get grades with details
       const baseQuery = SQL`
-        SELECT g.*, 
-          s.name as student_name, 
+        SELECT DISTINCT 
+          s.name as student_name,
           s.admission_number,
           c.name as class_name,
-          sub.name as subject_name
-        FROM grades g
+          e.name as exam_name,
+          e.term,
+          e.year,
+          g.subject_scores,
+          r.total_marks,
+          r.average_score,
+          r.rank,
+          r.total_students,
+          jsonb_object_agg(
+            sub.id, 
+            jsonb_build_object(
+              'name', sub.name,
+              'score', g.subject_scores->>sub.id
+            )
+          ) as subject_details
+        FROM grades_optimized g
         JOIN students s ON g.student_id = s.id
-        JOIN classes c ON g.class_id = c.id
-        JOIN subjects sub ON g.subject_id = sub.id
+        JOIN classes c ON s.id = ANY(
+          SELECT student_id FROM class_students WHERE class_id = c.id
+        )
+        JOIN exams e ON g.exam_id = e.id
+        LEFT JOIN exam_reports_mv r ON r.student_id = s.id 
+          AND r.exam_id = g.exam_id
+        JOIN subjects sub ON sub.id = ANY(array(SELECT jsonb_object_keys(g.subject_scores)))
         WHERE 1=1
       `;
 
-      if (query.class_id) {
-        baseQuery.append(SQL` AND g.class_id = ${query.class_id}`);
+      if (filters.admissionNumber) {
+        baseQuery.append(SQL` AND s.admission_number = ${filters.admissionNumber}`);
       }
-      if (query.student_id) {
-        baseQuery.append(SQL` AND g.student_id = ${query.student_id}`);
+      if (filters.studentName) {
+        baseQuery.append(SQL` AND s.name ILIKE ${`%${filters.studentName}%`}`);
       }
-      if (query.subject_id) {
-        baseQuery.append(SQL` AND g.subject_id = ${query.subject_id}`);
+      if (filters.classId) {
+        baseQuery.append(SQL` AND c.id = ${filters.classId}`);
       }
-      if (query.term) {
-        baseQuery.append(SQL` AND g.term = ${query.term}`);
-      }
-      if (query.year) {
-        baseQuery.append(SQL` AND g.year = ${query.year}`);
-      }
-      if (query.exam_name) {
-        baseQuery.append(SQL` AND g.exam_name = ${query.exam_name}`);
+      if (filters.examId) {
+        baseQuery.append(SQL` AND e.id = ${filters.examId}`);
       }
 
-      const { rows } = await pool.query(baseQuery);
-      
-      return {
-        data: rows,
-        total: rows.length,
-        page: 1,
-        limit: rows.length
-      };
-    } catch (error) {
-      logError('Error fetching grades:', error);
-      throw error;
-    }
-  }
-
-  async submitGrades(grades: Grade[]): Promise<ServiceResult<Grade[]>> {
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-
-      const insertedGrades = [];
-      for (const grade of grades) {
-        const { rows } = await client.query(SQL`
-          INSERT INTO grades (
-            student_id, class_id, subject_id,
-            score, term, year, exam_name
-          ) VALUES (
-            ${grade.student_id}, ${grade.class_id}, ${grade.subject_id},
-            ${grade.score}, ${grade.term}, ${grade.year}, ${grade.exam_name}
-          ) RETURNING *
-        `);
-        insertedGrades.push(rows[0]);
-      }
-
-      await client.query('COMMIT');
-      return { data: insertedGrades };
-    } catch (error) {
-      await client.query('ROLLBACK');
-      logError('Error submitting grades:', error);
-      throw error;
-    } finally {
-      client.release();
-    }
-  }
-
-  async updateGrade(gradeId: string, grade: Partial<Grade>): Promise<ServiceResult<Grade>> {
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-
-      const updateFields = [];
-      const values = [];
-      let valueIndex = 1;
-
-      if (grade.score !== undefined) {
-        updateFields.push(`score = $${valueIndex}`);
-        values.push(grade.score);
-        valueIndex++;
-      }
-      if (grade.term !== undefined) {
-        updateFields.push(`term = $${valueIndex}`);
-        values.push(grade.term);
-        valueIndex++;
-      }
-      if (grade.year !== undefined) {
-        updateFields.push(`year = $${valueIndex}`);
-        values.push(grade.year);
-        valueIndex++;
-      }
-      if (grade.exam_name !== undefined) {
-        updateFields.push(`exam_name = $${valueIndex}`);
-        values.push(grade.exam_name);
-        valueIndex++;
-      }
-
-      if (updateFields.length === 0) {
-        throw new ServiceError('No fields to update', 'INVALID_UPDATE', 400);
-      }
-
-      const query = `
-        UPDATE grades 
-        SET ${updateFields.join(', ')}
-        WHERE id = $${valueIndex}
-        RETURNING *
-      `;
-      values.push(gradeId);
-
-      const { rows } = await client.query(query, values);
-      if (rows.length === 0) {
-        throw new GradeNotFoundError(gradeId);
-      }
-
-      await client.query('COMMIT');
-      return { data: rows[0] };
-    } catch (error) {
-      await client.query('ROLLBACK');
-      logError('Error updating grade:', error);
-      throw error;
-    } finally {
-      client.release();
-    }
-  }
-
-  async deleteGrade(gradeId: string): Promise<ServiceResult<null>> {
-    try {
-      const { rowCount } = await pool.query(SQL`
-        DELETE FROM grades WHERE id = ${gradeId}
+      baseQuery.append(SQL` 
+        GROUP BY s.name, s.admission_number, c.name, e.name, e.term, e.year,
+                 g.subject_scores, r.total_marks, r.average_score, r.rank, r.total_students
+        ORDER BY e.year DESC, e.term DESC, student_name
       `);
 
-      if (rowCount === 0) {
-        throw new GradeNotFoundError(gradeId);
+      const { rows: gradeRows } = await pool.query(baseQuery);
+
+      // Get statistics if examId is provided
+      let statistics: GradeStatistics | null = null;
+      if (filters.examId) {
+        const statsQuery = SQL`
+          WITH exam_stats AS (
+            SELECT 
+              ROUND(AVG(r.average_score), 2) as class_average,
+              jsonb_object_agg(
+                s.name,
+                ROUND(AVG((g.subject_scores->>s.id)::numeric), 2)
+              ) as subject_averages,
+              MAX(r.total_marks) as highest_score,
+              MIN(r.total_marks) as lowest_score,
+              COUNT(*) FILTER (WHERE r.average_score >= 80) as grade_a,
+              COUNT(*) FILTER (WHERE r.average_score >= 70 AND r.average_score < 80) as grade_b,
+              COUNT(*) FILTER (WHERE r.average_score >= 60 AND r.average_score < 70) as grade_c,
+              COUNT(*) FILTER (WHERE r.average_score >= 50 AND r.average_score < 60) as grade_d,
+              COUNT(*) FILTER (WHERE r.average_score >= 40 AND r.average_score < 50) as grade_e,
+              COUNT(*) FILTER (WHERE r.average_score < 40) as grade_f
+            FROM exam_reports_mv r
+            JOIN grades_optimized g ON g.exam_id = r.exam_id
+            JOIN subjects s ON s.id = ANY(array(SELECT jsonb_object_keys(g.subject_scores)))
+            WHERE r.exam_id = ${filters.examId}
+          )
+          SELECT * FROM exam_stats
+        `;
+
+        const { rows: [stats] } = await pool.query(statsQuery);
+        if (stats) {
+          statistics = {
+            classAverage: stats.class_average,
+            subjectAverages: stats.subject_averages,
+            highestScore: stats.highest_score,
+            lowestScore: stats.lowest_score,
+            gradeDistribution: {
+              A: stats.grade_a,
+              B: stats.grade_b,
+              C: stats.grade_c,
+              D: stats.grade_d,
+              E: stats.grade_e,
+              F: stats.grade_f
+            }
+          };
+        }
       }
 
-      return { data: null };
-    } catch (error) {
-      logError('Error deleting grade:', error);
-      throw error;
-    }
-  }
-
-  async getStudentGrades(studentId: string): Promise<ServiceResult<Grade[]>> {
-    try {
-      const { rows } = await pool.query(SQL`
-        SELECT g.*, 
-          s.name as student_name,
-          c.name as class_name,
-          sub.name as subject_name
-        FROM grades g
-        JOIN students s ON g.student_id = s.id
-        JOIN classes c ON g.class_id = c.id
-        JOIN subjects sub ON g.subject_id = sub.id
-        WHERE g.student_id = ${studentId}
-        ORDER BY g.year DESC, g.term DESC, sub.name
-      `);
-
-      return { data: rows };
-    } catch (error) {
-      logError('Error fetching student grades:', error);
-      throw error;
-    }
-  }
-
-  async getClassGrades(classId: string, term?: number, year?: number): Promise<ServiceResult<Grade[]>> {
-    try {
-      const query = SQL`
-        SELECT g.*, 
-          s.name as student_name,
-          s.admission_number,
-          sub.name as subject_name
-        FROM grades g
-        JOIN students s ON g.student_id = s.id
-        JOIN subjects sub ON g.subject_id = sub.id
-        WHERE g.class_id = ${classId}
-      `;
-
-      if (term) query.append(SQL` AND g.term = ${term}`);
-      if (year) query.append(SQL` AND g.year = ${year}`);
-
-      query.append(SQL` ORDER BY s.name, sub.name`);
-
-      const { rows } = await pool.query(query);
-      return { data: rows };
-    } catch (error) {
-      logError('Error fetching class grades:', error);
-      throw error;
-    }
-  }
-
-  // New interface for grade statistics
-  export interface GradeStatistics {
-    classAverage: number;
-    highestScore: number;
-    lowestScore: number;
-    studentRankings: {
-      student_id: string;
-      student_name: string;
-      admission_number: string;
-      total_score: number;
-      average_score: number;
-      rank: number;
-      subject_scores: {
-        [key: string]: number;
-      };
-    }[];
-    subjectStatistics: {
-      subject_id: string;
-      subject_name: string;
-      average: number;
-      highest: number;
-      lowest: number;
-      passes: number;
-      fails: number;
-    }[];
-  }
-
-  async getGradeStatistics(
-    classId: string,
-    term: number,
-    year: number,
-    examName: string
-  ): Promise<ServiceResult<GradeStatistics>> {
-    const client = await pool.connect();
-    try {
-      // Get all grades for the exam
-      const { rows: grades } = await client.query(SQL`
-        SELECT 
-          g.*,
-          s.name as student_name,
-          s.admission_number,
-          sub.name as subject_name
-        FROM grades g
-        JOIN students s ON g.student_id = s.id
-        JOIN subjects sub ON g.subject_id = sub.id
-        WHERE g.class_id = ${classId}
-          AND g.term = ${term}
-          AND g.year = ${year}
-          AND g.exam_name = ${examName}
-      `);
-
-      if (grades.length === 0) {
-        return {
-          data: {
-            classAverage: 0,
-            highestScore: 0,
-            lowestScore: 0,
-            studentRankings: [],
-            subjectStatistics: []
-          }
-        };
-      }
-
-      // Calculate student totals and rankings
-      const studentScores = new Map();
-      const subjectStats = new Map();
-
-      // Initialize subject statistics
-      grades.forEach(grade => {
-        if (!subjectStats.has(grade.subject_id)) {
-          subjectStats.set(grade.subject_id, {
-            subject_id: grade.subject_id,
-            subject_name: grade.subject_name,
-            scores: [],
-            passes: 0,
-            fails: 0
-          });
-        }
-      });
-
-      // Process grades
-      grades.forEach(grade => {
-        // Update student scores
-        if (!studentScores.has(grade.student_id)) {
-          studentScores.set(grade.student_id, {
-            student_id: grade.student_id,
-            student_name: grade.student_name,
-            admission_number: grade.admission_number,
-            total_score: 0,
-            subject_count: 0,
-            subject_scores: {}
-          });
-        }
-        const student = studentScores.get(grade.student_id);
-        student.total_score += grade.score;
-        student.subject_count += 1;
-        student.subject_scores[grade.subject_id] = grade.score;
-
-        // Update subject statistics
-        const subject = subjectStats.get(grade.subject_id);
-        subject.scores.push(grade.score);
-        if (grade.score >= 50) {
-          subject.passes += 1;
-        } else {
-          subject.fails += 1;
-        }
-      });
-
-      // Calculate rankings
-      const rankings = Array.from(studentScores.values())
-        .map(student => ({
-          ...student,
-          average_score: student.total_score / student.subject_count
-        }))
-        .sort((a, b) => b.average_score - a.average_score)
-        .map((student, index) => ({
-          ...student,
-          rank: index + 1
-        }));
-
-      // Calculate subject statistics
-      const subjectStatistics = Array.from(subjectStats.values()).map(subject => ({
-        subject_id: subject.subject_id,
-        subject_name: subject.subject_name,
-        average: subject.scores.reduce((a, b) => a + b, 0) / subject.scores.length,
-        highest: Math.max(...subject.scores),
-        lowest: Math.min(...subject.scores),
-        passes: subject.passes,
-        fails: subject.fails
+      // Transform the rows
+      const transformedRows = gradeRows.map(row => ({
+        id: row.id,
+        examId: row.exam_id,
+        studentId: row.student_id,
+        academicYear: row.academic_year,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+        studentName: row.student_name,
+        studentAdmissionNumber: row.admission_number,
+        className: row.class_name,
+        examName: row.exam_name,
+        term: row.term,
+        year: row.year,
+        subjectScores: Object.entries(row.subject_details).map(([subjectId, details]: [string, any]) => ({
+          subjectId,
+          subjectName: details.name,
+          score: parseInt(details.score)
+        })),
+        totalMarks: row.total_marks,
+        averageScore: parseFloat(row.average_score),
+        rank: row.rank,
+        totalStudents: row.total_students
       }));
 
-      // Calculate overall statistics
-      const allScores = grades.map(g => g.score);
-      const classAverage = allScores.reduce((a, b) => a + b, 0) / allScores.length;
-
-      return {
+      return { 
+        success: true,
         data: {
-          classAverage,
-          highestScore: Math.max(...allScores),
-          lowestScore: Math.min(...allScores),
-          studentRankings: rankings,
-          subjectStatistics
+          grades: transformedRows,
+          statistics: statistics || {
+            classAverage: 0,
+            subjectAverages: {},
+            highestScore: 0,
+            lowestScore: 0,
+            gradeDistribution: { A: 0, B: 0, C: 0, D: 0, E: 0, F: 0 }
+          }
         }
       };
     } catch (error) {
-      logError('Error calculating grade statistics:', error);
-      throw error;
-    } finally {
-      client.release();
+      if (error instanceof ServiceError) throw error;
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      logError('Error fetching student grades:', errorMessage);
+      throw new ServiceError('Failed to fetch student grades', 'FETCH_ERROR');
     }
+  }
+
+  private calculateGrade(score: number): string {
+    if (score >= 80) return 'A';
+    if (score >= 75) return 'A-';
+    if (score >= 70) return 'B+';
+    if (score >= 65) return 'B';
+    if (score >= 60) return 'B-';
+    if (score >= 55) return 'C+';
+    if (score >= 50) return 'C';
+    if (score >= 45) return 'C-';
+    if (score >= 40) return 'D+';
+    if (score >= 35) return 'D';
+    if (score >= 30) return 'D-';
+    return 'E';
   }
 }
 
