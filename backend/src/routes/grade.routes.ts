@@ -1,31 +1,32 @@
-import express from 'express';
-import { authMiddleware } from '../middleware/auth.middleware';
-import {
-  getGrades,
-  submitGrades,
-  updateGrade,
-  deleteGrade,
-  getStudentGrades,
-  getClassGrades,
-  getGradeStatistics
-} from '../controllers/grade.controller';
+import { Router, RequestHandler } from 'express';
+import { verifyToken, requireRole, UserRole } from '../middlewares/auth.middleware';
+import { GradeController } from '../controllers/grade.controller';
+import { gradeValidation } from '../validators/grade.validator';
 
-const router = express.Router();
+const router = Router();
 
-// Apply auth middleware to all grade routes
-router.use(authMiddleware);
+// Apply authentication middleware
+router.use(verifyToken);
 
-// Grade management routes
-router.get('/', getGrades);
-router.post('/', submitGrades);
-router.put('/:id', updateGrade);
-router.delete('/:id', deleteGrade);
+// Create bulk grades (teachers only)
+router.post(
+  '/bulk', 
+  requireRole(UserRole.TEACHER),
+  GradeController.createGrades as RequestHandler
+);
 
-// Special routes for getting grades by student or class
-router.get('/student/:studentId', getStudentGrades);
-router.get('/class/:classId', getClassGrades);
+// Get student grades by filter (teachers and students)
+router.get(
+  '/search',
+  requireRole(UserRole.TEACHER),  // Teachers can search all grades
+  GradeController.getStudentGradesByFilter as RequestHandler
+);
 
-// Get grade statistics
-router.get('/statistics', getGradeStatistics);
+// Get student grades by filter (student view - will only see their own grades)
+router.get(
+  '/student/grades',
+  requireRole(UserRole.STUDENT),  // Students can only see their own grades
+  GradeController.getStudentGradesByFilter as RequestHandler
+);
 
 export default router;

@@ -92,3 +92,89 @@ export interface PaginatedResult<T> {
   page: number;
   limit: number;
 }
+
+// Report Types
+export interface ExamScore {
+  subjectId: string;
+  subjectName: string;
+  score: number;
+  grade: string;
+}
+
+export interface ExamReport {
+  examId: string;
+  examName: string;
+  date: Date;
+  scores: ExamScore[];
+  totalMarks: number;
+  average: number;
+  rank: number;
+  totalStudents: number;
+}
+
+export interface TermReport {
+  term: number;
+  year: number;
+  exams: ExamReport[];
+  termAverage: number;
+  termRank: number;
+  totalStudents: number;
+  classAverage: number;
+}
+
+export interface YearReport {
+  year: number;
+  terms: TermReport[];
+  yearAverage: number;
+  yearRank: number;
+  totalStudents: number;
+  classAverage: number;
+}
+
+export interface ClassTermReport {
+  term: number;
+  year: number;
+  classId: string;
+  className: string;
+  students: {
+    studentId: string;
+    studentName: string;
+    admissionNumber: string;
+    termAverage: number;
+    rank: number;
+    exams: ExamReport[];
+  }[];
+  classAverage: number;
+  totalStudents: number;
+}
+
+export interface ClassYearReport {
+  year: number;
+  classId: string;
+  className: string;
+  terms: {
+    term: number;
+    classAverage: number;
+    students: {
+      studentId: string;
+      studentName: string;
+      admissionNumber: string;
+      termAverage: number;
+      rank: number;
+    }[];
+  }[];
+  yearAverage: number;
+  totalStudents: number;
+}
+
+// Report Generation Request Types
+export interface GenerateTermReportRequest {
+  year: number;
+  term: number;
+  classId?: string; // Optional, if not provided generates for all classes
+}
+
+export interface GenerateYearReportRequest {
+  year: number;
+  classId?: string;
+}

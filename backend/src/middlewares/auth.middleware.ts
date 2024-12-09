@@ -29,25 +29,17 @@ export const verifyToken = async (req: Request, res: Response, next: NextFunctio
       return res.status(401).json({ message: 'No token provided' });
     }
 
-    // Verify token using Supabase
     const { data: { user }, error } = await supabase.auth.getUser(token);
     
     if (error || !user) {
       return res.status(401).json({ message: 'Invalid token' });
     }
 
-    // Get user's role from metadata
-    const role = user.user_metadata?.role;
-
-    if (!role) {
-      return res.status(401).json({ message: 'User role not found' });
-    }
-
-    // Attach user to request
+    // Set user data in request
     req.user = {
       id: user.id,
-      email: user.email!,
-      role: role as UserRole
+      role: user.user_metadata?.role as UserRole,
+      email: user.email!
     };
 
     next();
@@ -56,10 +48,18 @@ export const verifyToken = async (req: Request, res: Response, next: NextFunctio
   }
 };
 
-export const requireRole = (role: UserRole) => {
+export const requireRole = (roles: UserRole | UserRole[]) => {
   return (req: Request, res: Response, next: NextFunction) => {
-    if (req.user?.role !== role) {
-      return res.status(403).json({ message: 'Insufficient permissions' });
+    const userRole = req.user?.role;
+    if (!userRole) {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
+
+    const allowedRoles = Array.isArray(roles) ? roles : [roles];
+    if (!allowedRoles.includes(userRole)) {
+      return res.status(403).json({ 
+        message: `Access denied. Required role: ${Array.isArray(roles) ? roles.join(' or ') : roles}` 
+      });
     }
     next();
   };
